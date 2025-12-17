@@ -30,8 +30,8 @@ exports.registerUser = async (req, res) => {
     // 1. Determine Role based on Creator
     let newRole = '';
     if (creatorRole === 'Admin') newRole = 'BranchManager';
-    else if (creatorRole === 'BranchManager') newRole = 'HR';
-    else if (creatorRole === 'HR') newRole = 'Employee';
+    else if (creatorRole === 'BranchManager') newRole = 'TeamLead'; // CHANGED from HR
+    else if (creatorRole === 'TeamLead') newRole = 'Employee';
     else return res.status(403).json({ msg: "You are not authorized to create users." });
 
     // 2. Check if user exists

@@ -4,6 +4,7 @@ const Lead = require('../models/Lead');
 const User = require('../models/User');
 const UploadBatch = require('../models/UploadBatch'); // Ensure this model exists
 const Client = require('../models/Client');
+const Task = require('../models/Task')
 
 // --- HELPER: PHONE CLEANING ---
 const cleanPhoneNumber = (raw) => {
@@ -332,6 +333,61 @@ exports.logCall = async (req, res) => {
 
     await lead.save();
     res.json({ msg: "Call Logged Successfully", lead });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Server Error");
+  }
+};
+
+
+
+exports.logCall = async (req, res) => {
+  const { leadId, outcome, notes, duration, messageSent } = req.body; 
+
+  try {
+    const lead = await Lead.findById(leadId);
+    if (!lead) return res.status(404).json({ msg: "Lead not found" });
+
+    // 1. UPDATE LEAD STATUS (Existing Logic)
+    if (outcome === 'Connected - Interested') lead.status = 'Interested';
+    else if (outcome === 'DND') lead.status = 'Rejected';
+    else if (outcome === 'Busy') lead.status = 'Callback';
+    else lead.status = 'Contacted';
+
+    lead.callCount += 1;
+    lead.lastCallOutcome = outcome;
+    lead.lastCallDate = new Date();
+
+    lead.history.push({
+      action: `Call: ${outcome}`,
+      by: req.user.id,
+      date: new Date(),
+      details: notes,
+      duration: duration || 0,
+      messageSent: messageSent || null
+    });
+
+    await lead.save();
+
+    // 2. NEW: AUTO-CREATE TASK FOR CALLBACKS
+    if (outcome === 'Busy' || outcome === 'Callback' || outcome === 'Ringing') {
+      const nextDay = new Date();
+      nextDay.setHours(nextDay.getHours() + 24); // Default: Remind in 24 hours
+
+      await Task.create({
+        title: `Follow-up: ${lead.name}`,
+        description: `Auto-generated reminder. Last outcome: ${outcome}. Notes: ${notes}`,
+        assignedBy: req.user.id, // Self-assigned
+        assignedTo: req.user.id, // Self-assigned
+        type: 'System-Callback',
+        priority: 'High',
+        relatedLead: lead._id,
+        dueDate: nextDay
+      });
+    }
+
+    res.json({ msg: "Call Logged", lead });
 
   } catch (err) {
     console.error(err);

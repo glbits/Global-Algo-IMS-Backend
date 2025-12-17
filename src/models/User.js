@@ -6,7 +6,7 @@ const UserSchema = new mongoose.Schema({
   password: { type: String, required: true }, // Will store hashed password
   role: { 
     type: String, 
-    enum: ['Admin', 'BranchManager', 'HR', 'Employee'], 
+    enum: ['Admin', 'BranchManager', 'TeamLead', 'Employee'], 
     default: 'Employee' 
   },
   // The Hierarchy Link: Who manages this user?
