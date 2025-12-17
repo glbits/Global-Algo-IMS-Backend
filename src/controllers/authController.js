@@ -67,3 +67,15 @@ exports.getMySubordinates = async (req, res) => {
     res.status(500).send("Server Error");
   }
 };
+
+
+
+exports.getAllUsers = async (req, res) => {
+  try {
+    // Return ID, Name, and Role
+    const users = await User.find().select('name email role');
+    res.json(users);
+  } catch (err) {
+    res.status(500).send("Server Error");
+  }
+};
