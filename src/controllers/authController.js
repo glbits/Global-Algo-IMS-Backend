@@ -3,12 +3,35 @@ const jwt = require('jsonwebtoken');
 // const bcrypt = require('bcryptjs'); // Enable this if you are hashing passwords
 
 exports.login = async (req, res) => {
-  // ... (Keep your existing login logic) ...
   const { email, password } = req.body;
+
+  console.log("--------------------------------");
+  console.log("LOGIN ATTEMPT:");
+  console.log("Input Email:", `"${email}"`); // Quotes help see spaces
+  console.log("Input Password:", `"${password}"`);
+
   try {
-    const user = await User.findOne({ email });
-    if (!user) return res.status(400).json({ msg: "User not found" });
-    if (password !== user.password) return res.status(400).json({ msg: "Invalid Credentials" });
+    // DIAGNOSTIC: Print ALL users in the DB
+    const allUsers = await User.find({});
+    console.log("--- DEBUG: ALL USERS IN DB ---");
+    console.log(`Found ${allUsers.length} users.`);
+    allUsers.forEach(u => {
+        console.log(`ID: ${u._id} | Email: "${u.email}" | Pass: "${u.password}"`);
+    });
+    console.log("------------------------------");
+
+    // Standard Login Logic
+    const user = await User.findOne({ email: email.trim() }); // Added trim() fix
+
+    if (!user) {
+      console.log("❌ ERROR: User still not found via query.");
+      return res.status(400).json({ msg: "User not found" });
+    }
+
+    if (password !== user.password) {
+      console.log("❌ ERROR: Password mismatch.");
+      return res.status(400).json({ msg: "Invalid Credentials" });
+    }
 
     const token = jwt.sign(
       { id: user._id, role: user.role }, 
@@ -16,7 +39,9 @@ exports.login = async (req, res) => {
       { expiresIn: '1d' }
     );
     res.json({ token, user: { id: user._id, name: user.name, role: user.role } });
+
   } catch (err) {
+    console.error(err);
     res.status(500).send("Server Error");
   }
 };
