@@ -8,7 +8,9 @@ const {
   getUploadBatches, // NEW
   getBatchDetails,   // NEW
 getDashboardStats,
-logCall
+logCall,
+getLeadLifecycle,
+getArchivedLeads
 
 } = require('../controllers/leadController');
 
@@ -34,5 +36,11 @@ router.get('/batch/:id', auth, gatekeeper, getBatchDetails);
 
 router.get('/stats', auth, gatekeeper, getDashboardStats);
 router.post('/log-call', auth, gatekeeper, logCall);
+
+
+
+router.get('/:id/lifecycle', auth, gatekeeper, getLeadLifecycle);
+router.get('/archived', auth, gatekeeper, getArchivedLeads);
+
 
 module.exports = router;

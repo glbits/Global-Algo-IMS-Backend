@@ -138,12 +138,13 @@ exports.getBatchDetails = async (req, res) => {
 
 // --- 4. DISTRIBUTE LEADS (Waterfall Logic) ---
 exports.distributeLeads = async (req, res) => {
-  const { assignments } = req.body; 
+  const { assignments } = req.body;
   // Expected Payload: 
   // assignments: [ { userId: "123", count: 10 }, { userId: "456", count: 50 } ]
 
   try {
     const distributorId = req.user.id;
+    const distributorRole = req.user.role; // e.g., 'Admin', 'BranchManager'
 
     // 1. Validate: Do we have assignments?
     if (!assignments || !Array.isArray(assignments) || assignments.length === 0) {
@@ -154,8 +155,9 @@ exports.distributeLeads = async (req, res) => {
     const totalRequested = assignments.reduce((sum, item) => sum + Number(item.count), 0);
 
     // 3. Check Available Leads
+    // We look for leads currently assigned to the logged-in user that are 'New'
     const availableLeads = await Lead.find({ 
-      assignedTo: distributorId,
+      assignedTo: distributorId, 
       status: 'New' 
     });
 
@@ -165,23 +167,51 @@ exports.distributeLeads = async (req, res) => {
       });
     }
 
-    // 4. Distribution Loop
+    // 4. Distribution Loop with Forensic Tracking
     let currentIndex = 0;
     let distributedTotal = 0;
 
     for (const assignment of assignments) {
       const count = Number(assignment.count);
+      
       if (count > 0) {
-        // Slice the exact number of leads for this user
+        // Slice the exact number of leads for this user from the available pool
         const batch = availableLeads.slice(currentIndex, currentIndex + count);
         const batchIds = batch.map(l => l._id);
 
-        // Update DB
-        await Lead.updateMany(
-          { _id: { $in: batchIds } },
-          { $set: { assignedTo: assignment.userId } }
-        );
+        // Prepare Bulk Operations
+        // We use bulkWrite because we are pushing specific data to arrays, which is safer than updateMany for complex objects
+        const updates = batchIds.map(id => ({
+          updateOne: {
+            filter: { _id: id },
+            update: { 
+              $set: { assignedTo: assignment.userId },
+              $push: { 
+                // TRACKING: Add entry to Chain of Custody
+                custodyChain: {
+                  assignedTo: assignment.userId,
+                  assignedBy: distributorId,
+                  roleAtTime: distributorRole,
+                  assignedDate: new Date()
+                },
+                // TRACKING: Add entry to History Timeline
+                history: {
+                  action: 'Assignment',
+                  by: distributorId,
+                  details: `Passed to ${assignment.userId} by ${distributorRole}`,
+                  date: new Date()
+                }
+              }
+            }
+          }
+        }));
 
+        // Execute the updates for this batch
+        if (updates.length > 0) {
+          await Lead.bulkWrite(updates);
+        }
+
+        // Move the index forward for the next user in the assignment list
         currentIndex += count;
         distributedTotal += count;
       }
@@ -189,11 +219,11 @@ exports.distributeLeads = async (req, res) => {
 
     res.json({ 
       msg: "Success", 
-      details: `Distributed ${distributedTotal} leads successfully.` 
+      details: `Distributed ${distributedTotal} leads successfully with tracking.` 
     });
 
   } catch (err) {
-    console.error(err);
+    console.error("Distribution Error:", err);
     res.status(500).send("Server Error");
   }
 };
@@ -270,97 +300,50 @@ exports.getDashboardStats = async (req, res) => {
 
 
 exports.logCall = async (req, res) => {
-  const { leadId, outcome, notes } = req.body;
-  // outcome: 'Ringing', 'Not Interested', 'Callback', etc.
-
-  try {
-    const lead = await Lead.findById(leadId);
-    if (!lead) return res.status(404).json({ msg: "Lead not found" });
-
-    // Update Lead Data
-    lead.status = outcome === 'Not Interested' ? 'Rejected' : 'Contacted'; // Simple logic for now
-    if (outcome === 'Ringing' || outcome === 'Callback') lead.status = outcome;
-    
-    lead.callCount += 1;
-    lead.lastCallOutcome = outcome;
-    lead.lastCallDate = new Date();
-
-    // Add to History
-    lead.history.push({
-      action: `Call Logged: ${outcome}`,
-      by: req.user.id,
-      date: new Date(),
-      details: notes
-    });
-
-    await lead.save();
-    res.json({ msg: "Call Logged Successfully", lead });
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).send("Server Error");
-  }
-};
-
-
-
-
-exports.logCall = async (req, res) => {
-  const { leadId, outcome, notes, duration, messageSent } = req.body; // Added duration/messageSent
-
-  try {
-    const lead = await Lead.findById(leadId);
-    if (!lead) return res.status(404).json({ msg: "Lead not found" });
-
-    // Status Logic
-    if (outcome === 'Connected - Interested') lead.status = 'Interested';
-    else if (outcome === 'DND') lead.status = 'Rejected';
-    else if (outcome === 'Busy') lead.status = 'Callback';
-    else lead.status = 'Contacted';
-
-    lead.callCount += 1;
-    lead.lastCallOutcome = outcome;
-    lead.lastCallDate = new Date();
-
-    lead.history.push({
-      action: `Call: ${outcome}`,
-      by: req.user.id,
-      date: new Date(),
-      details: notes,
-      duration: duration || 0,
-      messageSent: messageSent || null
-    });
-
-    await lead.save();
-    res.json({ msg: "Call Logged Successfully", lead });
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).send("Server Error");
-  }
-};
-
-
-
-exports.logCall = async (req, res) => {
   const { leadId, outcome, notes, duration, messageSent } = req.body; 
 
   try {
     const lead = await Lead.findById(leadId);
     if (!lead) return res.status(404).json({ msg: "Lead not found" });
 
-    // 1. UPDATE LEAD STATUS (Existing Logic)
-    if (outcome === 'Connected - Interested') lead.status = 'Interested';
-    else if (outcome === 'DND') lead.status = 'Rejected';
-    else if (outcome === 'Busy') lead.status = 'Callback';
-    else lead.status = 'Contacted';
-
-    lead.callCount += 1;
+    // 1. INCREMENT TOUCHES (Forensic Tracking)
+    lead.touchCount = (lead.touchCount || 0) + 1;
+    lead.callCount += 1; 
     lead.lastCallOutcome = outcome;
     lead.lastCallDate = new Date();
 
+    // 2. STATUS LOGIC (Based on Outcome)
+    if (outcome === 'Connected - Interested') {
+        lead.status = 'Interested';
+    } else if (outcome === 'DND' || outcome === 'Wrong Number') {
+        lead.status = 'Rejected'; // Or 'Archived' immediately
+    } else if (outcome === 'Busy') {
+        lead.status = 'Busy';
+    } else if (outcome === 'Callback') {
+        lead.status = 'Callback';
+    } else if (outcome === 'Ringing') {
+        lead.status = 'Ringing';
+    } else {
+        lead.status = 'Contacted';
+    }
+
+    // 3. ARCHIVE LOGIC (The 8-Touch Rule)
+    // Rule A: Immediate Kill
+    if (outcome === 'DND' || outcome === 'Wrong Number') {
+      lead.status = 'Archived';
+      lead.isArchived = true;
+      lead.archiveReason = `Immediate Dump: ${outcome}`;
+    }
+    // Rule B: 8-Touch Limit
+    else if (lead.touchCount >= 8 && lead.status !== 'Interested' && lead.status !== 'Closed') {
+      lead.status = 'Archived';
+      lead.isArchived = true;
+      lead.archiveReason = 'Exceeded 8 Touches without conversion';
+    }
+
+    // 4. LOG HISTORY (The Timeline)
     lead.history.push({
-      action: `Call: ${outcome}`,
+      action: `Call Attempt #${lead.touchCount}: ${outcome}`,
       by: req.user.id,
       date: new Date(),
       details: notes,
@@ -370,14 +353,15 @@ exports.logCall = async (req, res) => {
 
     await lead.save();
 
-    // 2. NEW: AUTO-CREATE TASK FOR CALLBACKS
+    // 5. AUTO-TASK CREATION (The Follow-up Assurance)
+    // If the lead requested a callback or was busy, create a Task so the agent doesn't forget.
     if (outcome === 'Busy' || outcome === 'Callback' || outcome === 'Ringing') {
       const nextDay = new Date();
       nextDay.setHours(nextDay.getHours() + 24); // Default: Remind in 24 hours
 
       await Task.create({
         title: `Follow-up: ${lead.name}`,
-        description: `Auto-generated reminder. Last outcome: ${outcome}. Notes: ${notes}`,
+        description: `Auto-generated. Last outcome: ${outcome}. Notes: ${notes}`,
         assignedBy: req.user.id, // Self-assigned
         assignedTo: req.user.id, // Self-assigned
         type: 'System-Callback',
@@ -387,8 +371,40 @@ exports.logCall = async (req, res) => {
       });
     }
 
-    res.json({ msg: "Call Logged", lead });
+    res.json({ msg: "Call Logged Successfully", lead });
 
+  } catch (err) {
+    console.error("Log Call Error:", err);
+    res.status(500).send("Server Error");
+  }
+};
+
+
+exports.getLeadLifecycle = async (req, res) => {
+  try {
+    const lead = await Lead.findById(req.params.id)
+      .populate('custodyChain.assignedTo', 'name role')
+      .populate('custodyChain.assignedBy', 'name role')
+      .populate('history.by', 'name role');
+      
+    if (!lead) return res.status(404).json({ msg: "Lead not found" });
+
+    res.json(lead);
+  } catch (err) {
+    res.status(500).send("Server Error");
+  }
+};
+
+
+// --- GET DEAD ARCHIVE (Admin Only) ---
+exports.getArchivedLeads = async (req, res) => {
+  try {
+    // Fetch leads where isArchived is true
+    const archivedLeads = await Lead.find({ isArchived: true })
+      .populate('assignedTo', 'name role') // See who had it last
+      .sort({ updatedAt: -1 }); // Most recently died first
+
+    res.json(archivedLeads);
   } catch (err) {
     console.error(err);
     res.status(500).send("Server Error");
