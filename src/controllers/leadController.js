@@ -34,41 +34,53 @@ exports.uploadLeads = async (req, res) => {
       return res.status(400).json({ msg: "No file uploaded" });
     }
 
-    // A. Create a Batch Record (The "Folder" for this upload)
+    // A. Create a Batch Record
     const newBatch = new UploadBatch({
       fileName: req.file.originalname,
       uploadedBy: req.user.id,
-      totalCount: 0 // We will update this after counting valid leads
+      totalCount: 0
     });
     const savedBatch = await newBatch.save();
 
-    // B. Read Excel File
+    // B. Read Excel/CSV File
     const workbook = xlsx.read(req.file.buffer, { type: 'buffer' });
-    const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const rawData = xlsx.utils.sheet_to_json(sheet);
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+
+    // CRITICAL CHANGE: Use 'header: 1' to get data as an array of arrays
+    // Result: [ ["9876543210", "John Doe"], ["9123456789", "Jane"] ]
+    const rawRows = xlsx.utils.sheet_to_json(sheet, { header: 1 });
 
     // C. Process Rows
     const validLeads = [];
     const seenNumbers = new Set(); 
 
-    for (const row of rawData) {
-      // Check multiple possible header names
-      const rawPhone = row['Phone Number'] || row['Raw Phone'] || row['PhoneNumber'];
+    for (const row of rawRows) {
+      // row[0] is Column A (Phone), row[1] is Column B (Name)
+      
+      // Safety check: Skip empty rows
+      if (!row || row.length === 0) continue;
+
+      const rawPhone = row[0];
+      const rawName = row[1];
+
+      // Clean the phone number
       const cleanPhone = cleanPhoneNumber(rawPhone);
 
-      // Only add valid, unique (within file) numbers
+      // Check if it's a valid number AND not a duplicate in this file
+      // Also filters out the "Header" row if it exists (since "Phone" isn't a number)
       if (cleanPhone && !seenNumbers.has(cleanPhone)) {
         seenNumbers.add(cleanPhone);
         
         validLeads.push({
           phoneNumber: cleanPhone,
-          name: row['Source File'] || row['Name'] || "Unknown Source", 
-          assignedTo: req.user.id, // Assigned to Uploader (Admin) initially
+          name: rawName || "Unknown", // Default to Unknown if name is empty
+          assignedTo: req.user.id,    // Assigned to Admin initially
           status: 'New',
-          batchId: savedBatch._id, // LINK TO THE BATCH
+          batchId: savedBatch._id,
           data: {
-            originalRaw: rawPhone,
-            sNo: row['S.No']
+            originalRaw: rawPhone
+            // We removed sNo since the new file doesn't seem to have it
           }
         });
       }
@@ -76,27 +88,24 @@ exports.uploadLeads = async (req, res) => {
 
     // D. Handle Empty/Invalid File
     if (validLeads.length === 0) {
-      await UploadBatch.findByIdAndDelete(savedBatch._id); // Cleanup empty batch
-      return res.status(400).json({ msg: "No valid phone numbers found in file." });
+      await UploadBatch.findByIdAndDelete(savedBatch._id);
+      return res.status(400).json({ msg: "No valid phone numbers found. Ensure Column A has numbers." });
     }
 
     // E. Bulk Insert to DB
     try {
-      // ordered: false ensures that if one duplicate fails, the rest continue
+      // ordered: false ensures duplicates don't stop the whole process
       await Lead.insertMany(validLeads, { ordered: false });
       
-      // Update the Batch count with the actual number of leads
       savedBatch.totalCount = validLeads.length;
       await savedBatch.save();
 
       res.json({ msg: `Success! Batch '${req.file.originalname}' created with ${validLeads.length} leads.` });
 
     } catch (insertError) {
-      // If some failed due to duplicates, calculate how many actually succeeded
       if (insertError.writeErrors) {
+        // Some duplicates failed, but valid ones were inserted
         const insertedCount = insertError.insertedDocs.length;
-        
-        // Update batch count to reflect only successful inserts
         savedBatch.totalCount = insertedCount;
         await savedBatch.save();
 
@@ -111,7 +120,6 @@ exports.uploadLeads = async (req, res) => {
     res.status(500).json({ msg: "Server Error during Upload" });
   }
 };
-
 // --- 2. GET UPLOAD HISTORY (List of Files) ---
 exports.getUploadBatches = async (req, res) => {
   try {
