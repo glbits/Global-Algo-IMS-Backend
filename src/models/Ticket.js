@@ -3,11 +3,11 @@ const mongoose = require('mongoose');
 const TicketSchema = new mongoose.Schema({
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   
-  // NEW: Who is this ticket for?
+  // Who is currently responsible?
   recipient: { 
     type: String, 
     enum: ['Admin', 'BranchManager'], 
-    default: 'Admin' 
+    default: 'BranchManager' 
   },
 
   category: { 
@@ -20,7 +20,12 @@ const TicketSchema = new mongoose.Schema({
   description: { type: String, required: true },
   
   status: { type: String, enum: ['Open', 'Resolved'], default: 'Open' },
-  adminResponse: String 
+  
+  // NEW: Resolution Details (The "Input" you asked for)
+  resolutionDetails: { type: String }, 
+  resolvedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  resolvedDate: { type: Date }
+
 }, { timestamps: true });
 
 module.exports = mongoose.model('Ticket', TicketSchema);

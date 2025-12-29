@@ -115,3 +115,40 @@ exports.getAllUsers = async (req, res) => {
     res.status(500).send("Server Error");
   }
 };
+
+
+// --- DELETE USER ---
+exports.deleteUser = async (req, res) => {
+  try {
+    const userToDelete = await User.findById(req.params.id);
+    if (!userToDelete) return res.status(404).json({ msg: "User not found" });
+
+    // 1. Reassign their leads to the Admin (or keep unassigned)
+    // We set assignedTo: req.user.id (The Admin deleting them) so they don't disappear.
+    await require('../models/Lead').updateMany(
+      { assignedTo: userToDelete._id },
+      { assignedTo: req.user.id, status: 'New', touchCount: 0 } // Reset for next person
+    );
+
+    // 2. Delete the User
+    await User.findByIdAndDelete(req.params.id);
+
+    res.json({ msg: "User deleted. Their leads have been returned to you." });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Server Error");
+  }
+};
+
+
+
+// --- GET CURRENT USER PROFILE ---
+exports.getMe = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select('-password');
+    res.json(user);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Server Error");
+  }
+};

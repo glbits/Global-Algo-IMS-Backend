@@ -10,7 +10,8 @@ const {
 getDashboardStats,
 logCall,
 getLeadLifecycle,
-getArchivedLeads
+getArchivedLeads,
+adminReassign
 
 } = require('../controllers/leadController');
 
@@ -41,6 +42,9 @@ router.post('/log-call', auth, gatekeeper, logCall);
 
 router.get('/:id/lifecycle', auth, gatekeeper, getLeadLifecycle);
 router.get('/archived', auth, gatekeeper, getArchivedLeads);
+
+
+router.post('/reassign', auth, gatekeeper, adminReassign);
 
 
 module.exports = router;

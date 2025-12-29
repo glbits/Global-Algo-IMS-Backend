@@ -306,87 +306,109 @@ exports.getDashboardStats = async (req, res) => {
   }
 };
 
-
+// --- LOG CALL (With Forensic & Recycle Logic) ---
 exports.logCall = async (req, res) => {
+  // FIX: Added messageSent to destructuring
   const { leadId, outcome, notes, duration, messageSent } = req.body; 
 
   try {
     const lead = await Lead.findById(leadId);
     if (!lead) return res.status(404).json({ msg: "Lead not found" });
 
-    // 1. INCREMENT TOUCHES (Forensic Tracking)
-    lead.touchCount = (lead.touchCount || 0) + 1;
-    lead.callCount += 1; 
+    const currentUser = req.user.id;
+
+    // 1. UPDATE BASIC STATS
+    lead.touchCount = (lead.touchCount || 0) + 1; // Local counter for current agent
+    lead.callCount += 1; // Global counter
     lead.lastCallOutcome = outcome;
     lead.lastCallDate = new Date();
 
-    // 2. STATUS LOGIC (Based on Outcome)
-    if (outcome === 'Connected - Interested') {
-        lead.status = 'Interested';
-    } else if (outcome === 'DND' || outcome === 'Wrong Number') {
-        lead.status = 'Rejected'; // Or 'Archived' immediately
-    } else if (outcome === 'Busy') {
-        lead.status = 'Busy';
-    } else if (outcome === 'Callback') {
-        lead.status = 'Callback';
-    } else if (outcome === 'Ringing') {
-        lead.status = 'Ringing';
-    } else {
-        lead.status = 'Contacted';
-    }
+    // 2. STATUS UPDATE
+    if (outcome === 'Connected - Interested') lead.status = 'Interested';
+    else if (outcome === 'Busy') lead.status = 'Busy';
+    else if (outcome === 'Callback') lead.status = 'Callback';
+    else if (outcome === 'Ringing') lead.status = 'Ringing';
+    else lead.status = 'Contacted';
 
-    // 3. ARCHIVE LOGIC (The 8-Touch Rule)
-    // Rule A: Immediate Kill
-    if (outcome === 'DND' || outcome === 'Wrong Number') {
-      lead.status = 'Archived';
-      lead.isArchived = true;
-      lead.archiveReason = `Immediate Dump: ${outcome}`;
-    }
-    // Rule B: 8-Touch Limit
-    else if (lead.touchCount >= 8 && lead.status !== 'Interested' && lead.status !== 'Closed') {
-      lead.status = 'Archived';
-      lead.isArchived = true;
-      lead.archiveReason = 'Exceeded 8 Touches without conversion';
-    }
-
-    // 4. LOG HISTORY (The Timeline)
+    // 3. LOG HISTORY
     lead.history.push({
-      action: `Call Attempt #${lead.touchCount}: ${outcome}`,
-      by: req.user.id,
+      // The action MUST start with the word "Call" for the dashboard to count it
+      action: `Call Attempt #${lead.touchCount}: ${outcome}`, 
+      by: currentUser,
       date: new Date(),
       details: notes,
       duration: duration || 0,
-      messageSent: messageSent || null
+      messageSent: messageSent || null // This will now work correctly
     });
 
-    await lead.save();
+    // --- 4. THE SMART RECYCLE LOGIC ---
 
-    // 5. AUTO-TASK CREATION (The Follow-up Assurance)
-    // If the lead requested a callback or was busy, create a Task so the agent doesn't forget.
-    if (outcome === 'Busy' || outcome === 'Callback' || outcome === 'Ringing') {
-      const nextDay = new Date();
-      nextDay.setHours(nextDay.getHours() + 24); // Default: Remind in 24 hours
+    // RULE A: IMMEDIATE DEATH (DND / Wrong Number) -> Stop Everything
+    if (outcome === 'DND' || outcome === 'Wrong Number') {
+      lead.status = 'Archived';
+      lead.isArchived = true;
+      lead.archiveReason = `Permanently Dead: ${outcome} (Marked by Agent)`; 
+      lead.assignedTo = null; // Unassign completely
+    }
+    
+    // RULE B: RECYCLE (Hit 8 Touches OR Agent gave up)
+    else if (lead.touchCount >= 8 && lead.status !== 'Interested') {
+      
+      // 1. Get list of everyone who has ALREADY worked this lead
+      // We look at the 'custodyChain' to see past owners
+      const previousOwners = lead.custodyChain.map(entry => entry.assignedTo.toString());
+      
+      // Add current user to that list (just in case)
+      if (!previousOwners.includes(currentUser)) previousOwners.push(currentUser);
 
-      await Task.create({
-        title: `Follow-up: ${lead.name}`,
-        description: `Auto-generated. Last outcome: ${outcome}. Notes: ${notes}`,
-        assignedBy: req.user.id, // Self-assigned
-        assignedTo: req.user.id, // Self-assigned
-        type: 'System-Callback',
-        priority: 'High',
-        relatedLead: lead._id,
-        dueDate: nextDay
+      // 2. Find FRESH Agents (Active Employees who are NOT in previousOwners)
+      const freshAgents = await User.find({ 
+        role: 'Employee', 
+        _id: { $nin: previousOwners } // $nin = Not In
       });
+
+      if (freshAgents.length > 0) {
+        // 3. REASSIGN TO NEW AGENT
+        const randomAgent = freshAgents[Math.floor(Math.random() * freshAgents.length)];
+        
+        // Push old owner to chain before switching
+        lead.custodyChain.push({
+          assignedTo: currentUser,
+          assignedBy: currentUser, // System/Self trigger
+          roleAtTime: 'Employee',
+          assignedDate: new Date() // Date they FINISHED
+        });
+
+        // Update Lead for New Agent
+        lead.assignedTo = randomAgent._id;
+        lead.status = 'New'; // Fresh start for them
+        lead.touchCount = 0; // Reset counter for them
+        
+        // Log the handover
+        lead.history.push({
+          action: 'System Recycle',
+          by: currentUser,
+          details: `Max touches reached. Recycled to ${randomAgent.name} (Fresh Agent).`,
+          date: new Date()
+        });
+
+      } else {
+        // 4. TOTAL EXHAUSTION (Everyone has tried it)
+        lead.status = 'Archived';
+        lead.isArchived = true;
+        lead.archiveReason = 'Exhausted: Attempted by all available employees.';
+        lead.assignedTo = null;
+      }
     }
 
-    res.json({ msg: "Call Logged Successfully", lead });
+    await lead.save();
+    res.json({ msg: "Call Logged", lead });
 
   } catch (err) {
-    console.error("Log Call Error:", err);
+    console.error(err);
     res.status(500).send("Server Error");
   }
 };
-
 
 exports.getLeadLifecycle = async (req, res) => {
   try {
@@ -415,6 +437,52 @@ exports.getArchivedLeads = async (req, res) => {
     res.json(archivedLeads);
   } catch (err) {
     console.error(err);
+    res.status(500).send("Server Error");
+  }
+};
+
+
+
+
+
+
+
+// --- ADMIN REASSIGN (God Mode) ---
+exports.adminReassign = async (req, res) => {
+  const { leadId, newUserId } = req.body;
+
+  try {
+    const lead = await Lead.findById(leadId);
+    if (!lead) return res.status(404).json({ msg: "Lead not found" });
+
+    const adminId = req.user.id;
+
+    // 1. Log the Force Move
+    lead.custodyChain.push({
+      assignedTo: lead.assignedTo, // The person losing it
+      assignedBy: adminId,
+      roleAtTime: 'Admin Override',
+      assignedDate: new Date()
+    });
+
+    lead.history.push({
+      action: 'Admin Override',
+      by: adminId,
+      details: `Admin forced reassignment to new user.`,
+      date: new Date()
+    });
+
+    // 2. Update Lead
+    lead.assignedTo = newUserId;
+    lead.status = 'New'; // Reset so new agent notices it
+    lead.touchCount = 0; // Reset their tries
+    lead.isArchived = false; // Bring back to life if it was dead
+    lead.archiveReason = null;
+
+    await lead.save();
+    res.json({ msg: "Lead Reassigned Successfully" });
+
+  } catch (err) {
     res.status(500).send("Server Error");
   }
 };

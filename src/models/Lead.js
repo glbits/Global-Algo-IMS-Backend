@@ -6,13 +6,13 @@ const LeadSchema = new mongoose.Schema({
   
   status: { 
     type: String, 
-    // FIXED: Added 'Callback', 'Busy', 'Ringing' to the list
     enum: ['New', 'Contacted', 'Interested', 'Closed', 'Rejected', 'Archived', 'Callback', 'Busy', 'Ringing'], 
     default: 'New' 
   },
 
   // LEAD FORENSICS
   touchCount: { type: Number, default: 0 }, 
+  recycleCount: { type: Number, default: 0 }, // <--- NEW FIELD
   isArchived: { type: Boolean, default: false }, 
   archiveReason: { type: String }, 
 
@@ -32,7 +32,6 @@ const LeadSchema = new mongoose.Schema({
     action: String, 
     by: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     date: { type: Date, default: Date.now },
-    outcome: String,
     details: String,
     duration: Number,
     messageSent: String
