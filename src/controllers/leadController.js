@@ -2,9 +2,9 @@ const xlsx = require('xlsx');
 const mongoose = require('mongoose');
 const Lead = require('../models/Lead');
 const User = require('../models/User');
-const UploadBatch = require('../models/UploadBatch'); // Ensure this model exists
+const UploadBatch = require('../models/UploadBatch'); 
 const Client = require('../models/Client');
-const Task = require('../models/Task')
+const Task = require('../models/Task');
 
 // --- HELPER: PHONE CLEANING ---
 const cleanPhoneNumber = (raw) => {
@@ -47,8 +47,7 @@ exports.uploadLeads = async (req, res) => {
     const sheetName = workbook.SheetNames[0];
     const sheet = workbook.Sheets[sheetName];
 
-    // CRITICAL CHANGE: Use 'header: 1' to get data as an array of arrays
-    // Result: [ ["9876543210", "John Doe"], ["9123456789", "Jane"] ]
+    // Get data as array of arrays
     const rawRows = xlsx.utils.sheet_to_json(sheet, { header: 1 });
 
     // C. Process Rows
@@ -56,31 +55,24 @@ exports.uploadLeads = async (req, res) => {
     const seenNumbers = new Set(); 
 
     for (const row of rawRows) {
-      // row[0] is Column A (Phone), row[1] is Column B (Name)
-      
-      // Safety check: Skip empty rows
       if (!row || row.length === 0) continue;
 
       const rawPhone = row[0];
       const rawName = row[1];
 
-      // Clean the phone number
       const cleanPhone = cleanPhoneNumber(rawPhone);
 
-      // Check if it's a valid number AND not a duplicate in this file
-      // Also filters out the "Header" row if it exists (since "Phone" isn't a number)
       if (cleanPhone && !seenNumbers.has(cleanPhone)) {
         seenNumbers.add(cleanPhone);
         
         validLeads.push({
           phoneNumber: cleanPhone,
-          name: rawName || "Unknown", // Default to Unknown if name is empty
-          assignedTo: req.user.id,    // Assigned to Admin initially
+          name: rawName || "Unknown",
+          assignedTo: req.user.id,
           status: 'New',
           batchId: savedBatch._id,
           data: {
             originalRaw: rawPhone
-            // We removed sNo since the new file doesn't seem to have it
           }
         });
       }
@@ -94,7 +86,6 @@ exports.uploadLeads = async (req, res) => {
 
     // E. Bulk Insert to DB
     try {
-      // ordered: false ensures duplicates don't stop the whole process
       await Lead.insertMany(validLeads, { ordered: false });
       
       savedBatch.totalCount = validLeads.length;
@@ -104,7 +95,6 @@ exports.uploadLeads = async (req, res) => {
 
     } catch (insertError) {
       if (insertError.writeErrors) {
-        // Some duplicates failed, but valid ones were inserted
         const insertedCount = insertError.insertedDocs.length;
         savedBatch.totalCount = insertedCount;
         await savedBatch.save();
@@ -120,13 +110,13 @@ exports.uploadLeads = async (req, res) => {
     res.status(500).json({ msg: "Server Error during Upload" });
   }
 };
+
 // --- 2. GET UPLOAD HISTORY (List of Files) ---
 exports.getUploadBatches = async (req, res) => {
   try {
     const batches = await UploadBatch.find()
-      .sort({ uploadDate: -1 }) // Newest first
-      // UPDATE THIS LINE: Add 'role' to the string
-      .populate('uploadedBy', 'name role'); 
+      .sort({ uploadDate: -1 }) 
+      .populate('uploadedBy', 'name role'); // CORRECT: Includes role for the "Me" check
     res.json(batches);
   } catch (err) {
     console.error(err);
@@ -145,26 +135,20 @@ exports.getBatchDetails = async (req, res) => {
   }
 };
 
-// --- 4. DISTRIBUTE LEADS (Waterfall Logic) ---
+// --- 4. DISTRIBUTE LEADS ---
 exports.distributeLeads = async (req, res) => {
   const { assignments } = req.body;
-  // Expected Payload: 
-  // assignments: [ { userId: "123", count: 10 }, { userId: "456", count: 50 } ]
 
   try {
     const distributorId = req.user.id;
-    const distributorRole = req.user.role; // e.g., 'Admin', 'BranchManager'
+    const distributorRole = req.user.role; 
 
-    // 1. Validate: Do we have assignments?
     if (!assignments || !Array.isArray(assignments) || assignments.length === 0) {
       return res.status(400).json({ msg: "No distribution data provided." });
     }
 
-    // 2. Calculate Total Requested
     const totalRequested = assignments.reduce((sum, item) => sum + Number(item.count), 0);
 
-    // 3. Check Available Leads
-    // We look for leads currently assigned to the logged-in user that are 'New'
     const availableLeads = await Lead.find({ 
       assignedTo: distributorId, 
       status: 'New' 
@@ -176,7 +160,6 @@ exports.distributeLeads = async (req, res) => {
       });
     }
 
-    // 4. Distribution Loop with Forensic Tracking
     let currentIndex = 0;
     let distributedTotal = 0;
 
@@ -184,26 +167,21 @@ exports.distributeLeads = async (req, res) => {
       const count = Number(assignment.count);
       
       if (count > 0) {
-        // Slice the exact number of leads for this user from the available pool
         const batch = availableLeads.slice(currentIndex, currentIndex + count);
         const batchIds = batch.map(l => l._id);
 
-        // Prepare Bulk Operations
-        // We use bulkWrite because we are pushing specific data to arrays, which is safer than updateMany for complex objects
         const updates = batchIds.map(id => ({
           updateOne: {
             filter: { _id: id },
             update: { 
               $set: { assignedTo: assignment.userId },
               $push: { 
-                // TRACKING: Add entry to Chain of Custody
                 custodyChain: {
                   assignedTo: assignment.userId,
                   assignedBy: distributorId,
                   roleAtTime: distributorRole,
                   assignedDate: new Date()
                 },
-                // TRACKING: Add entry to History Timeline
                 history: {
                   action: 'Assignment',
                   by: distributorId,
@@ -215,12 +193,10 @@ exports.distributeLeads = async (req, res) => {
           }
         }));
 
-        // Execute the updates for this batch
         if (updates.length > 0) {
           await Lead.bulkWrite(updates);
         }
 
-        // Move the index forward for the next user in the assignment list
         currentIndex += count;
         distributedTotal += count;
       }
@@ -228,7 +204,7 @@ exports.distributeLeads = async (req, res) => {
 
     res.json({ 
       msg: "Success", 
-      details: `Distributed ${distributedTotal} leads successfully with tracking.` 
+      details: `Distributed ${distributedTotal} leads successfully.` 
     });
 
   } catch (err) {
@@ -240,11 +216,9 @@ exports.distributeLeads = async (req, res) => {
 // --- 5. GET MY ASSIGNED LEADS ---
 exports.getMyLeads = async (req, res) => {
   try {
-    // Fetch leads assigned to the logged-in user, sorted by newest
     const leads = await Lead.find({ assignedTo: req.user.id })
       .sort({ createdAt: -1 })
       .limit(100); 
-
     res.json(leads);
   } catch (err) {
     console.error(err);
@@ -252,25 +226,19 @@ exports.getMyLeads = async (req, res) => {
   }
 };
 
+// --- DASHBOARD STATS ---
 exports.getDashboardStats = async (req, res) => {
   try {
     const userId = req.user.id;
     
-    // 1. Get Available Leads (Existing Logic)
     const availableLeads = await Lead.countDocuments({ 
       assignedTo: userId, 
       status: 'New' 
     });
 
-    // 2. Calculate "Calls Today"
-    // We look for leads where 'history.by' is ME and 'history.date' is TODAY
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
-    
-    const endOfDay = new Date();
-    endOfDay.setHours(23, 59, 59, 999);
+    const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(); endOfDay.setHours(23, 59, 59, 999);
 
-    // This aggregate pipeline counts how many history entries match criteria
     const callStats = await Lead.aggregate([
       { $match: { "history.by": new mongoose.Types.ObjectId(userId) } },
       { $unwind: "$history" },
@@ -282,24 +250,16 @@ exports.getDashboardStats = async (req, res) => {
     ]);
     const callsToday = callStats.length > 0 ? callStats[0].count : 0;
 
-    // 3. Calculate "Conversions" & "Earnings" (From Clients)
     const newClients = await Client.find({
       managedBy: userId,
       createdAt: { $gte: startOfDay, $lte: endOfDay }
     });
 
     const conversions = newClients.length;
-    
-    // Logic: Sum of Capital * 1% (Adjust this formula as needed)
     const totalCapital = newClients.reduce((sum, client) => sum + (client.investmentCapital || 0), 0);
-    const estimatedEarnings = totalCapital * 0.01; // Example: 1% Commission
+    const estimatedEarnings = totalCapital * 0.01; 
 
-    res.json({ 
-      availableLeads,
-      callsToday,
-      conversions,
-      estimatedEarnings
-    });
+    res.json({ availableLeads, callsToday, conversions, estimatedEarnings });
 
   } catch (err) {
     console.error(err);
@@ -307,9 +267,8 @@ exports.getDashboardStats = async (req, res) => {
   }
 };
 
-// --- LOG CALL (With Forensic & Recycle Logic) ---
+// --- LOG CALL ---
 exports.logCall = async (req, res) => {
-  // FIX: Added messageSent to destructuring
   const { leadId, outcome, notes, duration, messageSent } = req.body; 
 
   try {
@@ -318,74 +277,56 @@ exports.logCall = async (req, res) => {
 
     const currentUser = req.user.id;
 
-    // 1. UPDATE BASIC STATS
-    lead.touchCount = (lead.touchCount || 0) + 1; // Local counter for current agent
-    lead.callCount += 1; // Global counter
+    lead.touchCount = (lead.touchCount || 0) + 1; 
+    lead.callCount += 1; 
     lead.lastCallOutcome = outcome;
     lead.lastCallDate = new Date();
 
-    // 2. STATUS UPDATE
     if (outcome === 'Connected - Interested') lead.status = 'Interested';
     else if (outcome === 'Busy') lead.status = 'Busy';
     else if (outcome === 'Callback') lead.status = 'Callback';
     else if (outcome === 'Ringing') lead.status = 'Ringing';
     else lead.status = 'Contacted';
 
-    // 3. LOG HISTORY
     lead.history.push({
-      // The action MUST start with the word "Call" for the dashboard to count it
       action: `Call Attempt #${lead.touchCount}: ${outcome}`, 
       by: currentUser,
       date: new Date(),
       details: notes,
       duration: duration || 0,
-      messageSent: messageSent || null // This will now work correctly
+      messageSent: messageSent || null 
     });
 
-    // --- 4. THE SMART RECYCLE LOGIC ---
-
-    // RULE A: IMMEDIATE DEATH (DND / Wrong Number) -> Stop Everything
+    // --- RECYCLE LOGIC ---
     if (outcome === 'DND' || outcome === 'Wrong Number') {
       lead.status = 'Archived';
       lead.isArchived = true;
       lead.archiveReason = `Permanently Dead: ${outcome} (Marked by Agent)`; 
-      lead.assignedTo = null; // Unassign completely
+      lead.assignedTo = null; 
     }
-    
-    // RULE B: RECYCLE (Hit 8 Touches OR Agent gave up)
     else if (lead.touchCount >= 8 && lead.status !== 'Interested') {
-      
-      // 1. Get list of everyone who has ALREADY worked this lead
-      // We look at the 'custodyChain' to see past owners
       const previousOwners = lead.custodyChain.map(entry => entry.assignedTo.toString());
-      
-      // Add current user to that list (just in case)
       if (!previousOwners.includes(currentUser)) previousOwners.push(currentUser);
 
-      // 2. Find FRESH Agents (Active Employees who are NOT in previousOwners)
       const freshAgents = await User.find({ 
         role: 'Employee', 
-        _id: { $nin: previousOwners } // $nin = Not In
+        _id: { $nin: previousOwners } 
       });
 
       if (freshAgents.length > 0) {
-        // 3. REASSIGN TO NEW AGENT
         const randomAgent = freshAgents[Math.floor(Math.random() * freshAgents.length)];
         
-        // Push old owner to chain before switching
         lead.custodyChain.push({
           assignedTo: currentUser,
-          assignedBy: currentUser, // System/Self trigger
+          assignedBy: currentUser, 
           roleAtTime: 'Employee',
-          assignedDate: new Date() // Date they FINISHED
+          assignedDate: new Date() 
         });
 
-        // Update Lead for New Agent
         lead.assignedTo = randomAgent._id;
-        lead.status = 'New'; // Fresh start for them
-        lead.touchCount = 0; // Reset counter for them
+        lead.status = 'New'; 
+        lead.touchCount = 0; 
         
-        // Log the handover
         lead.history.push({
           action: 'System Recycle',
           by: currentUser,
@@ -394,7 +335,6 @@ exports.logCall = async (req, res) => {
         });
 
       } else {
-        // 4. TOTAL EXHAUSTION (Everyone has tried it)
         lead.status = 'Archived';
         lead.isArchived = true;
         lead.archiveReason = 'Exhausted: Attempted by all available employees.';
@@ -426,14 +366,12 @@ exports.getLeadLifecycle = async (req, res) => {
   }
 };
 
-
 // --- GET DEAD ARCHIVE (Admin Only) ---
 exports.getArchivedLeads = async (req, res) => {
   try {
-    // Fetch leads where isArchived is true
     const archivedLeads = await Lead.find({ isArchived: true })
-      .populate('assignedTo', 'name role') // See who had it last
-      .sort({ updatedAt: -1 }); // Most recently died first
+      .populate('assignedTo', 'name role') 
+      .sort({ updatedAt: -1 });
 
     res.json(archivedLeads);
   } catch (err) {
@@ -441,12 +379,6 @@ exports.getArchivedLeads = async (req, res) => {
     res.status(500).send("Server Error");
   }
 };
-
-
-
-
-
-
 
 // --- ADMIN REASSIGN (God Mode) ---
 exports.adminReassign = async (req, res) => {
@@ -458,9 +390,8 @@ exports.adminReassign = async (req, res) => {
 
     const adminId = req.user.id;
 
-    // 1. Log the Force Move
     lead.custodyChain.push({
-      assignedTo: lead.assignedTo, // The person losing it
+      assignedTo: lead.assignedTo, 
       assignedBy: adminId,
       roleAtTime: 'Admin Override',
       assignedDate: new Date()
@@ -473,11 +404,10 @@ exports.adminReassign = async (req, res) => {
       date: new Date()
     });
 
-    // 2. Update Lead
     lead.assignedTo = newUserId;
-    lead.status = 'New'; // Reset so new agent notices it
-    lead.touchCount = 0; // Reset their tries
-    lead.isArchived = false; // Bring back to life if it was dead
+    lead.status = 'New'; 
+    lead.touchCount = 0; 
+    lead.isArchived = false; 
     lead.archiveReason = null;
 
     await lead.save();
@@ -488,8 +418,6 @@ exports.adminReassign = async (req, res) => {
   }
 };
 
-
-
 // --- DELETE BATCH (Safe Delete) ---
 exports.deleteBatch = async (req, res) => {
   try {
@@ -497,40 +425,30 @@ exports.deleteBatch = async (req, res) => {
     const userId = req.user.id;
     const userRole = req.user.role;
 
-    // 1. Find the Batch
     const batch = await UploadBatch.findById(batchId);
     if (!batch) return res.status(404).json({ msg: "File not found" });
 
-    // 2. PERMISSION CHECK
-    // Rule: LeadManager cannot delete Admin's files
+    // PERMISSION CHECK
     if (userRole === 'LeadManager') {
-      // Check if the uploader was an Admin
       const uploader = await User.findById(batch.uploadedBy);
       if (uploader && uploader.role === 'Admin') {
         return res.status(403).json({ msg: "Access Denied: You cannot delete Admin uploads." });
       }
-      // Check if it's someone else's file (optional, but good practice)
       if (batch.uploadedBy.toString() !== userId) {
         return res.status(403).json({ msg: "Access Denied: You can only delete your own files." });
       }
     }
-    // Admin can delete ANYTHING, so no 'else' needed for them.
 
-    // 3. SAFE DELETE LOGIC (The "Employee Protection" Rule)
-    // We only delete leads that are 'New' AND have 0 touches.
-    // This preserves any lead that has been called, noted, or changed status.
+    // SAFE DELETE LOGIC (Preserve touched leads)
     const deleteResult = await Lead.deleteMany({ 
       batchId: batchId,
       status: 'New',
       touchCount: 0 
     });
 
-    // 4. Check what remains
     const remainingLeads = await Lead.countDocuments({ batchId: batchId });
 
-    // 5. Delete the Batch Record itself (The "File")
-    // Even if some leads remain (because they were worked on), we remove the *File Record*
-    // so it disappears from the history list. The worked leads just become "Orphaned" (which is fine, they are now history).
+    // Delete the batch record regardless
     await UploadBatch.findByIdAndDelete(batchId);
 
     res.json({ 
