@@ -11,7 +11,8 @@ getDashboardStats,
 logCall,
 getLeadLifecycle,
 getArchivedLeads,
-adminReassign
+adminReassign,
+deleteBatch
 
 } = require('../controllers/leadController');
 
@@ -45,6 +46,7 @@ router.get('/archived', auth, gatekeeper, getArchivedLeads);
 
 
 router.post('/reassign', auth, gatekeeper, adminReassign);
+router.delete('/batch/:id', auth, gatekeeper,deleteBatch);
 
 
 module.exports = router;

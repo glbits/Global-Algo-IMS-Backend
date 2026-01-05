@@ -11,16 +11,14 @@ exports.getManagerDashboard = async (req, res) => {
     // --- 1. FETCH ALL TEAM MEMBERS (Including Self) ---
     let allTeamUsers = [];
 
-    if (role === 'Admin') {
-      // Admin sees everyone
+   if (role === 'Admin' || role === 'LeadManager') {
       allTeamUsers = await User.find({});
     } else {
-      // Managers see direct reports + themselves
-      // (This fetches immediate subordinates)
+      // Regular Manager Logic
       allTeamUsers = await User.find({ 
         $or: [
             { reportsTo: userId },
-            { _id: userId } // Include self for Call Stats
+            { _id: userId } 
         ]
       });
     }
