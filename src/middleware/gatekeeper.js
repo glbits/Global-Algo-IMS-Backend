@@ -3,7 +3,11 @@ const Attendance = require('../models/Attendance');
 const gatekeeper = async (req, res, next) => {
   try {
     // 1. IMMUNITY: Admin AND BranchManager do NOT need attendance
-    if (req.user.role === 'Admin' || req.user.role === 'BranchManager') {
+    if (
+      req.user.role === 'Admin' || 
+      req.user.role === 'BranchManager' || 
+      req.user.role === 'LeadManager' // <--- ADDED
+    ) {
       return next();
     }
 

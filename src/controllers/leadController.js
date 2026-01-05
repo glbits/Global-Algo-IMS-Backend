@@ -125,7 +125,8 @@ exports.getUploadBatches = async (req, res) => {
   try {
     const batches = await UploadBatch.find()
       .sort({ uploadDate: -1 }) // Newest first
-      .populate('uploadedBy', 'name'); // Include uploader's name
+      // UPDATE THIS LINE: Add 'role' to the string
+      .populate('uploadedBy', 'name role'); 
     res.json(batches);
   } catch (err) {
     console.error(err);
@@ -483,6 +484,63 @@ exports.adminReassign = async (req, res) => {
     res.json({ msg: "Lead Reassigned Successfully" });
 
   } catch (err) {
+    res.status(500).send("Server Error");
+  }
+};
+
+
+
+// --- DELETE BATCH (Safe Delete) ---
+exports.deleteBatch = async (req, res) => {
+  try {
+    const batchId = req.params.id;
+    const userId = req.user.id;
+    const userRole = req.user.role;
+
+    // 1. Find the Batch
+    const batch = await UploadBatch.findById(batchId);
+    if (!batch) return res.status(404).json({ msg: "File not found" });
+
+    // 2. PERMISSION CHECK
+    // Rule: LeadManager cannot delete Admin's files
+    if (userRole === 'LeadManager') {
+      // Check if the uploader was an Admin
+      const uploader = await User.findById(batch.uploadedBy);
+      if (uploader && uploader.role === 'Admin') {
+        return res.status(403).json({ msg: "Access Denied: You cannot delete Admin uploads." });
+      }
+      // Check if it's someone else's file (optional, but good practice)
+      if (batch.uploadedBy.toString() !== userId) {
+        return res.status(403).json({ msg: "Access Denied: You can only delete your own files." });
+      }
+    }
+    // Admin can delete ANYTHING, so no 'else' needed for them.
+
+    // 3. SAFE DELETE LOGIC (The "Employee Protection" Rule)
+    // We only delete leads that are 'New' AND have 0 touches.
+    // This preserves any lead that has been called, noted, or changed status.
+    const deleteResult = await Lead.deleteMany({ 
+      batchId: batchId,
+      status: 'New',
+      touchCount: 0 
+    });
+
+    // 4. Check what remains
+    const remainingLeads = await Lead.countDocuments({ batchId: batchId });
+
+    // 5. Delete the Batch Record itself (The "File")
+    // Even if some leads remain (because they were worked on), we remove the *File Record*
+    // so it disappears from the history list. The worked leads just become "Orphaned" (which is fine, they are now history).
+    await UploadBatch.findByIdAndDelete(batchId);
+
+    res.json({ 
+      msg: "Batch Deleted", 
+      deletedCount: deleteResult.deletedCount, 
+      retainedCount: remainingLeads 
+    });
+
+  } catch (err) {
+    console.error(err);
     res.status(500).send("Server Error");
   }
 };
