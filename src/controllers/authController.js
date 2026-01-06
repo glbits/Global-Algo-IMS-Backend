@@ -217,10 +217,16 @@ exports.registerUser = async (req, res) => {
   try {
     // 1. Role Hierarchy Check
     let newRole = '';
-    if (creatorRole === 'Admin') newRole = 'BranchManager';
+    
+    if (creatorRole === 'Admin') {
+      // Admin can create BranchManagers AND LeadManagers
+      // We will need to pass the desired 'role' from the frontend form later.
+      // For now, let's allow explicit role assignment if Admin.
+      newRole = req.body.role || 'BranchManager'; 
+    }
     else if (creatorRole === 'BranchManager') newRole = 'TeamLead';
     else if (creatorRole === 'TeamLead') newRole = 'Employee';
-    else return res.status(403).json({ msg: "You are not authorized to create users." });
+    else return res.status(403).json({ msg: "Not authorized" });
 
     // 2. Check Duplicate
     let user = await User.findOne({ email });

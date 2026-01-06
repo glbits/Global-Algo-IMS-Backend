@@ -8,52 +8,64 @@ exports.getManagerDashboard = async (req, res) => {
     const role = req.user.role;
     const today = new Date().toISOString().split('T')[0];
 
-    // --- 1. IDENTIFY TEAM (Who do I monitor?) ---
-    let teamIds = [];
-    
-    // FIX 1: Include Admin in the stats too!
-    if (role === 'Admin') {
-      const allUsers = await User.find({}); // Fetch EVERYONE (including Admin)
-      teamIds = allUsers.map(u => u._id);
+    // --- 1. FETCH ALL TEAM MEMBERS (Including Self) ---
+    let allTeamUsers = [];
+
+   if (role === 'Admin' || role === 'LeadManager') {
+      allTeamUsers = await User.find({});
     } else {
-      // For Managers: Fetch direct reports + Self
-      const directReports = await User.find({ reportsTo: userId });
-      teamIds = directReports.map(u => u._id);
-      teamIds.push(userId); // Add manager themselves
+      // Regular Manager Logic
+      allTeamUsers = await User.find({ 
+        $or: [
+            { reportsTo: userId },
+            { _id: userId } 
+        ]
+      });
     }
 
-    // --- 2. LIVE ATTENDANCE ---
+    // --- 2. CREATE SPECIFIC LISTS ---
+    
+    // LIST A: For Attendance (Filter out Admin & BM)
+    // We only track attendance for TeamLead and Employee
+    const attendanceUsers = allTeamUsers.filter(u => 
+      u.role === 'TeamLead' || u.role === 'Employee'
+    );
+    const attendanceIds = attendanceUsers.map(u => u._id);
+
+    // LIST B: For Lead Stats (Include Everyone)
+    // Calls made by Admin or BM should still count in the "Work Done" stats
+    const leadStatsIds = allTeamUsers.map(u => u._id);
+
+
+    // --- 3. CALCULATE ATTENDANCE (Using List A) ---
     const attendanceRecords = await Attendance.find({ 
-      user: { $in: teamIds }, 
+      user: { $in: attendanceIds }, 
       date: today 
     }).populate('user', 'name role');
 
     const attendanceSummary = {
-      total: teamIds.length,
+      total: attendanceIds.length, // This will now show "0/X" where X is only trackable staff
       present: attendanceRecords.length,
       late: attendanceRecords.filter(r => r.isLate).length,
-      absent: teamIds.length - attendanceRecords.length,
+      absent: attendanceIds.length - attendanceRecords.length,
       onCall: attendanceRecords.filter(r => r.currentStatus === 'On-call').map(r => r.user.name),
       online: attendanceRecords.filter(r => r.currentStatus === 'Online').length
     };
 
-    // --- 3. LEAD VELOCITY (Assigned vs Contacted Today) ---
+    // --- 4. CALCULATE LEAD VELOCITY (Using List B) ---
     const startOfDay = new Date(); startOfDay.setHours(0,0,0,0);
     const endOfDay = new Date(); endOfDay.setHours(23,59,59,999);
 
-    // A. DENOMINATOR: Leads Assigned/Given Today
+    // A. Leads currently held by the team (Active Pool)
     const leadsAssignedToday = await Lead.countDocuments({
-      assignedTo: { $in: teamIds },
-      // Logic: Count any lead currently held by the team that isn't Archived
+      assignedTo: { $in: leadStatsIds },
       status: { $ne: 'Archived' } 
     });
 
-    // B. NUMERATOR: Actual CALLS made Today (FIXED LOGIC)
-    // We filter history elements to match ONLY 'Call Attempt' actions
+    // B. Actual CALLS made Today (By anyone in the team, including Admin)
     const leadsContactedToday = await Lead.countDocuments({
-      "history.by": { $in: teamIds },
+      "history.by": { $in: leadStatsIds },
       "history.date": { $gte: startOfDay, $lte: endOfDay },
-      // FIX 2: Only count records where action starts with "Call"
       "history.action": { $regex: /^Call/, $options: 'i' } 
     });
 

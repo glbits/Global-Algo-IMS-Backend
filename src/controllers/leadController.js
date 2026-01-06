@@ -10,31 +10,21 @@ const Task = require('../models/Task');
 // --- HELPER: PHONE CLEANING ---
 const cleanPhoneNumber = (raw) => {
   if (!raw) return null;
-
   let clean = String(raw).replace(/\D/g, '');
-
-  if (clean.length > 10 && clean.startsWith('91')) {
-    clean = clean.substring(2);
-  }
-
-  if (clean.length > 10 && clean.startsWith('0')) {
-    clean = clean.substring(1);
-  }
-
+  if (clean.length > 10 && clean.startsWith('91')) clean = clean.substring(2);
+  if (clean.length > 10 && clean.startsWith('0')) clean = clean.substring(1);
   return clean.length === 10 ? clean : null;
 };
 
-// --- HELPER: NAME CLEANING ---
+// --- HELPER: NAME CLEANING (For Docx) ---
 const extractNameFromContext = (fullText, matchIndex, matchLength, rawPhoneString) => {
   const start = fullText.lastIndexOf('\n', matchIndex);
   const lineStart = start === -1 ? 0 : start + 1;
-
   const end = fullText.indexOf('\n', matchIndex + matchLength);
   const lineEnd = end === -1 ? fullText.length : end;
 
   let line = fullText.substring(lineStart, lineEnd);
   let text = line.replace(rawPhoneString, '');
-
   text = text.replace(/name[:\s-]*|mobile[:\s-]*|phone[:\s-]*/gi, '');
   text = text.replace(/[^a-zA-Z\s]/g, ' ').trim();
   text = text.replace(/\s+/g, ' ');
@@ -42,12 +32,10 @@ const extractNameFromContext = (fullText, matchIndex, matchLength, rawPhoneStrin
   return text.length > 1 ? text : "Unknown (Doc)";
 };
 
-// --- 1. UPLOAD LEADS (FULL TEXT SCAN VERSION) ---
+// --- 1. UPLOAD LEADS (Robust: Excel + Docx) ---
 exports.uploadLeads = async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({ msg: "No file uploaded" });
-    }
+    if (!req.file) return res.status(400).json({ msg: "No file uploaded" });
 
     // A. Create Batch Record
     const newBatch = new UploadBatch({
@@ -60,9 +48,8 @@ exports.uploadLeads = async (req, res) => {
     const validLeads = [];
     const seenNumbers = new Set();
 
-    const isDocx =
-      req.file.originalname.match(/\.docx$/i) ||
-      req.file.mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    const isDocx = req.file.originalname.match(/\.docx$/i) || 
+                   req.file.mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
     // --- STRATEGY A: DOCX PROCESSING ---
     if (isDocx) {
@@ -79,13 +66,7 @@ exports.uploadLeads = async (req, res) => {
         if (clean && ['6', '7', '8', '9'].includes(clean[0])) {
           if (!seenNumbers.has(clean)) {
             seenNumbers.add(clean);
-
-            const detectedName = extractNameFromContext(
-              fullText,
-              match.index,
-              rawMatch.length,
-              rawMatch
-            );
+            const detectedName = extractNameFromContext(fullText, match.index, rawMatch.length, rawMatch);
 
             validLeads.push({
               phoneNumber: clean,
@@ -93,15 +74,12 @@ exports.uploadLeads = async (req, res) => {
               assignedTo: req.user.id,
               status: 'New',
               batchId: savedBatch._id,
-              data: {
-                originalRaw: rawMatch.replace(/\n/g, ' ')
-              }
+              data: { originalRaw: rawMatch.replace(/\n/g, ' ') }
             });
           }
         }
       }
     }
-
     // --- STRATEGY B: EXCEL/CSV PROCESSING ---
     else {
       const workbook = xlsx.read(req.file.buffer, { type: 'buffer' });
@@ -113,17 +91,13 @@ exports.uploadLeads = async (req, res) => {
         if (!row || row.length === 0) continue;
 
         const rowPhones = new Set();
-
+        // Scan row for phones
         for (const cell of row) {
           if (!cell) continue;
-
           const parts = String(cell).split(/[,/\n&|;]+/);
-
           for (const part of parts) {
             const clean = cleanPhoneNumber(part);
-            if (clean && ['6', '7', '8', '9'].includes(clean[0])) {
-              rowPhones.add(clean);
-            }
+            if (clean && ['6', '7', '8', '9'].includes(clean[0])) rowPhones.add(clean);
           }
         }
 
@@ -138,20 +112,11 @@ exports.uploadLeads = async (req, res) => {
           if (!/[a-zA-Z]/.test(s)) return false;
           if (/\d/.test(s)) return false;
           const lower = s.toLowerCase();
-          if (['status', 'date', 'remarks', 'amount', 'mobile', 'name', 'phone'].includes(lower)) return false;
-          return true;
+          return !['status', 'date', 'remarks', 'amount', 'mobile', 'name', 'phone'].includes(lower);
         };
 
         if (isName(row[1])) detectedName = String(row[1]).trim();
         else if (isName(row[0])) detectedName = String(row[0]).trim();
-        else {
-          for (const cell of row) {
-            if (isName(cell)) {
-              detectedName = String(cell).trim();
-              break;
-            }
-          }
-        }
 
         rowPhones.forEach(phone => {
           if (!seenNumbers.has(phone)) {
@@ -177,57 +142,48 @@ exports.uploadLeads = async (req, res) => {
 
     try {
       await Lead.insertMany(validLeads, { ordered: false });
-
       savedBatch.totalCount = validLeads.length;
       await savedBatch.save();
-
-      res.json({ msg: `Success! Extracted ${validLeads.length} leads from file.`, batchId: savedBatch._id });
-
+      res.json({ msg: `Success! Extracted ${validLeads.length} leads.`, batchId: savedBatch._id });
     } catch (insertError) {
       if (insertError.writeErrors) {
         const insertedCount = insertError.insertedDocs.length;
         savedBatch.totalCount = insertedCount;
         await savedBatch.save();
-        res.json({
-          msg: `Imported ${insertedCount} leads (Skipped ${validLeads.length - insertedCount} duplicates).`,
-          batchId: savedBatch._id
-        });
+        res.json({ msg: `Imported ${insertedCount} leads (Skipped duplicates).`, batchId: savedBatch._id });
       } else {
         throw insertError;
       }
     }
-
   } catch (err) {
     console.error("Upload Error:", err);
     res.status(500).json({ msg: "Server Error during Upload" });
   }
 };
 
-// --- 2. GET ALL UPLOAD BATCHES ---
+// --- 2. GET UPLOAD BATCHES (With Role Info) ---
 exports.getUploadBatches = async (req, res) => {
   try {
     const batches = await UploadBatch.find()
       .sort({ uploadDate: -1 })
-      .populate('uploadedBy', 'name');
+      .populate('uploadedBy', 'name role'); // Includes role for "Me" check
     res.json(batches);
   } catch (err) {
-    console.error(err);
     res.status(500).send("Server Error");
   }
 };
 
-// --- 3. GET LEADS FOR A SPECIFIC BATCH ---
+// --- 3. GET LEADS FOR A BATCH ---
 exports.getBatchDetails = async (req, res) => {
   try {
     const leads = await Lead.find({ batchId: req.params.id });
     res.json(leads);
   } catch (err) {
-    console.error(err);
     res.status(500).send("Server Error");
   }
 };
 
-// ✅✅✅ --- 4. DISTRIBUTE LEADS (BATCH-WISE OR ALL BATCHES) ---
+// --- 4. DISTRIBUTE LEADS (Supports Batch Filtering) ---
 exports.distributeLeads = async (req, res) => {
   const { assignments, batchId } = req.body;
 
@@ -235,29 +191,16 @@ exports.distributeLeads = async (req, res) => {
     const distributorId = req.user.id;
     const distributorRole = req.user.role;
 
-    // ✅ CHANGE 1: batchId is NOT required anymore (null/undefined means ALL batches)
-
     if (!assignments || !Array.isArray(assignments) || assignments.length === 0) {
       return res.status(400).json({ msg: "No distribution data provided." });
     }
 
     const totalRequested = assignments.reduce((sum, item) => sum + Number(item.count || 0), 0);
+    if (totalRequested <= 0) return res.status(400).json({ msg: "Count must be > 0" });
 
-    if (totalRequested <= 0) {
-      return res.status(400).json({ msg: "Total distribution count must be greater than 0." });
-    }
-
-    // ✅ CHANGE 2: dynamic filter (batchId optional)
-    const leadFilter = {
-      assignedTo: distributorId,
-      status: "New",
-    };
-
-    // If batchId provided -> filter by batch
-    // If batchId missing/null -> ALL batches
-    if (batchId) {
-      leadFilter.batchId = batchId;
-    }
+    // Filter Logic
+    const leadFilter = { assignedTo: distributorId, status: "New" };
+    if (batchId) leadFilter.batchId = batchId;
 
     const availableLeads = await Lead.find(leadFilter).sort({ createdAt: 1 });
 
@@ -302,9 +245,7 @@ exports.distributeLeads = async (req, res) => {
           }
         }));
 
-        if (updates.length > 0) {
-          await Lead.bulkWrite(updates);
-        }
+        if (updates.length > 0) await Lead.bulkWrite(updates);
 
         currentIndex += count;
         distributedTotal += count;
@@ -313,7 +254,7 @@ exports.distributeLeads = async (req, res) => {
 
     res.json({
       msg: "Success",
-      details: `Distributed ${distributedTotal} leads successfully ${batchId ? `from batch ${batchId}` : "from ALL batches"}.`
+      details: `Distributed ${distributedTotal} leads successfully.`
     });
 
   } catch (err) {
@@ -322,23 +263,17 @@ exports.distributeLeads = async (req, res) => {
   }
 };
 
-// ✅ --- 5. GET MY ASSIGNED LEADS (OPTIONAL: filter by batch) ---
+// --- 5. GET MY ASSIGNED LEADS (Optional Batch Filter) ---
 exports.getMyLeads = async (req, res) => {
   try {
     const filter = { assignedTo: req.user.id };
-
-    // Optional filter: /my-leads?batchId=xxxx
-    if (req.query.batchId) {
-      filter.batchId = req.query.batchId;
-    }
+    if (req.query.batchId) filter.batchId = req.query.batchId;
 
     const leads = await Lead.find(filter)
       .sort({ createdAt: -1 })
       .limit(100);
-
     res.json(leads);
   } catch (err) {
-    console.error(err);
     res.status(500).send("Server Error");
   }
 };
@@ -347,26 +282,18 @@ exports.getMyLeads = async (req, res) => {
 exports.getDashboardStats = async (req, res) => {
   try {
     const userId = req.user.id;
+    const availableLeads = await Lead.countDocuments({ assignedTo: userId, status: 'New' });
 
-    const availableLeads = await Lead.countDocuments({
-      assignedTo: userId,
-      status: 'New'
-    });
-
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
-    const endOfDay = new Date();
-    endOfDay.setHours(23, 59, 59, 999);
+    const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(); endOfDay.setHours(23, 59, 59, 999);
 
     const callStats = await Lead.aggregate([
       { $match: { "history.by": new mongoose.Types.ObjectId(userId) } },
       { $unwind: "$history" },
-      {
-        $match: {
+      { $match: { 
           "history.by": new mongoose.Types.ObjectId(userId),
           "history.date": { $gte: startOfDay, $lte: endOfDay }
-        }
-      },
+      }},
       { $count: "count" }
     ]);
     const callsToday = callStats.length > 0 ? callStats[0].count : 0;
@@ -376,38 +303,26 @@ exports.getDashboardStats = async (req, res) => {
       createdAt: { $gte: startOfDay, $lte: endOfDay }
     });
 
-    const conversions = newClients.length;
     const totalCapital = newClients.reduce((sum, client) => sum + (client.investmentCapital || 0), 0);
     const estimatedEarnings = totalCapital * 0.01;
 
-    res.json({
-      availableLeads,
-      callsToday,
-      conversions,
-      estimatedEarnings
-    });
-
+    res.json({ availableLeads, callsToday, conversions: newClients.length, estimatedEarnings });
   } catch (err) {
-    console.error(err);
     res.status(500).send("Server Error");
   }
 };
 
-// --- 7. LOG CALL (Your existing logic - untouched) ---
+// --- 7. LOG CALL (With messageSent & Recycle) ---
 exports.logCall = async (req, res) => {
-  const { leadId, outcome, notes, duration, messageSent } = req.body;
+  const { leadId, outcome, notes, duration, messageSent } = req.body; 
 
   try {
     const lead = await Lead.findById(leadId);
     if (!lead) return res.status(404).json({ msg: "Lead not found" });
 
     const currentUser = req.user.id;
-
-    lead.touchCount = (lead.touchCount || 0) + 1;
-
-    // ⚠️ NOTE: Your code uses lead.callCount but it's not in schema
-    lead.callCount += 1;
-
+    lead.touchCount = (lead.touchCount || 0) + 1; 
+    lead.callCount += 1; 
     lead.lastCallOutcome = outcome;
     lead.lastCallDate = new Date();
 
@@ -418,53 +333,48 @@ exports.logCall = async (req, res) => {
     else lead.status = 'Contacted';
 
     lead.history.push({
-      action: `Call Attempt #${lead.touchCount}: ${outcome}`,
+      action: `Call Attempt #${lead.touchCount}: ${outcome}`, 
       by: currentUser,
       date: new Date(),
       details: notes,
       duration: duration || 0,
-      messageSent: messageSent || null
+      messageSent: messageSent || null 
     });
 
-    // RULE A
+    // RECYCLE LOGIC
     if (outcome === 'DND' || outcome === 'Wrong Number') {
       lead.status = 'Archived';
       lead.isArchived = true;
-      lead.archiveReason = `Permanently Dead: ${outcome} (Marked by Agent)`;
-      lead.assignedTo = null;
+      lead.archiveReason = `Permanently Dead: ${outcome}`; 
+      lead.assignedTo = null; 
     }
-
-    // RULE B
     else if (lead.touchCount >= 8 && lead.status !== 'Interested') {
       const previousOwners = lead.custodyChain.map(entry => entry.assignedTo.toString());
       if (!previousOwners.includes(currentUser)) previousOwners.push(currentUser);
 
-      const freshAgents = await User.find({
-        role: 'Employee',
-        _id: { $nin: previousOwners }
+      const freshAgents = await User.find({ 
+        role: 'Employee', 
+        _id: { $nin: previousOwners } 
       });
 
       if (freshAgents.length > 0) {
         const randomAgent = freshAgents[Math.floor(Math.random() * freshAgents.length)];
-
         lead.custodyChain.push({
           assignedTo: currentUser,
-          assignedBy: currentUser,
+          assignedBy: currentUser, 
           roleAtTime: 'Employee',
-          assignedDate: new Date()
+          assignedDate: new Date() 
         });
-
         lead.assignedTo = randomAgent._id;
-        lead.status = 'New';
-        lead.touchCount = 0;
-
+        lead.status = 'New'; 
+        lead.touchCount = 0; 
+        
         lead.history.push({
           action: 'System Recycle',
           by: currentUser,
           details: `Max touches reached. Recycled to ${randomAgent.name} (Fresh Agent).`,
           date: new Date()
         });
-
       } else {
         lead.status = 'Archived';
         lead.isArchived = true;
@@ -475,9 +385,7 @@ exports.logCall = async (req, res) => {
 
     await lead.save();
     res.json({ msg: "Call Logged", lead });
-
   } catch (err) {
-    console.error(err);
     res.status(500).send("Server Error");
   }
 };
@@ -489,9 +397,7 @@ exports.getLeadLifecycle = async (req, res) => {
       .populate('custodyChain.assignedTo', 'name role')
       .populate('custodyChain.assignedBy', 'name role')
       .populate('history.by', 'name role');
-
     if (!lead) return res.status(404).json({ msg: "Lead not found" });
-
     res.json(lead);
   } catch (err) {
     res.status(500).send("Server Error");
@@ -502,12 +408,10 @@ exports.getLeadLifecycle = async (req, res) => {
 exports.getArchivedLeads = async (req, res) => {
   try {
     const archivedLeads = await Lead.find({ isArchived: true })
-      .populate('assignedTo', 'name role')
+      .populate('assignedTo', 'name role') 
       .sort({ updatedAt: -1 });
-
     res.json(archivedLeads);
   } catch (err) {
-    console.error(err);
     res.status(500).send("Server Error");
   }
 };
@@ -515,20 +419,17 @@ exports.getArchivedLeads = async (req, res) => {
 // --- 10. ADMIN REASSIGN ---
 exports.adminReassign = async (req, res) => {
   const { leadId, newUserId } = req.body;
-
   try {
     const lead = await Lead.findById(leadId);
     if (!lead) return res.status(404).json({ msg: "Lead not found" });
 
     const adminId = req.user.id;
-
     lead.custodyChain.push({
-      assignedTo: lead.assignedTo,
+      assignedTo: lead.assignedTo, 
       assignedBy: adminId,
       roleAtTime: 'Admin Override',
       assignedDate: new Date()
     });
-
     lead.history.push({
       action: 'Admin Override',
       by: adminId,
@@ -537,15 +438,54 @@ exports.adminReassign = async (req, res) => {
     });
 
     lead.assignedTo = newUserId;
-    lead.status = 'New';
-    lead.touchCount = 0;
-    lead.isArchived = false;
+    lead.status = 'New'; 
+    lead.touchCount = 0; 
+    lead.isArchived = false; 
     lead.archiveReason = null;
 
     await lead.save();
     res.json({ msg: "Lead Reassigned Successfully" });
-
   } catch (err) {
+    res.status(500).send("Server Error");
+  }
+};
+
+// --- 11. DELETE BATCH (Safe Delete) ---
+exports.deleteBatch = async (req, res) => {
+  try {
+    const batchId = req.params.id;
+    const userId = req.user.id;
+    const userRole = req.user.role;
+
+    const batch = await UploadBatch.findById(batchId);
+    if (!batch) return res.status(404).json({ msg: "File not found" });
+
+    if (userRole === 'LeadManager') {
+      const uploader = await User.findById(batch.uploadedBy);
+      if (uploader && uploader.role === 'Admin') {
+        return res.status(403).json({ msg: "Access Denied: You cannot delete Admin uploads." });
+      }
+      if (batch.uploadedBy.toString() !== userId) {
+        return res.status(403).json({ msg: "Access Denied: You can only delete your own files." });
+      }
+    }
+
+    const deleteResult = await Lead.deleteMany({ 
+      batchId: batchId,
+      status: 'New',
+      touchCount: 0 
+    });
+
+    const remainingLeads = await Lead.countDocuments({ batchId: batchId });
+    await UploadBatch.findByIdAndDelete(batchId);
+
+    res.json({ 
+      msg: "Batch Deleted", 
+      deletedCount: deleteResult.deletedCount, 
+      retainedCount: remainingLeads 
+    });
+  } catch (err) {
+    console.error(err);
     res.status(500).send("Server Error");
   }
 };
