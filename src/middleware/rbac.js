@@ -66,9 +66,12 @@ const requireCanManageTarget = async (req, res, next) => {
   }
 };
 
-module.exports = {
-  ROLE_RANK,
-  authorizeRoles,
-  canManageTargetUser,
-  requireCanManageTarget
+exports.authorizeRoles = (...allowedRoles) => {
+  return (req, res, next) => {
+    const role = req.user?.role;
+    if (!role) return res.status(401).json({ msg: 'Unauthorized' });
+    if (!allowedRoles.includes(role)) return res.status(403).json({ msg: 'Forbidden' });
+    next();
+  };
 };
+
