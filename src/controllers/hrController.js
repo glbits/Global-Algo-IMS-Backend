@@ -1,93 +1,60 @@
 const mongoose = require('mongoose');
 const User = require('../models/User');
 const Attendance = require('../models/Attendance');
-
-// These two models must exist as I shared earlier:
-// src/models/PayrollRun.js
-// src/models/PayrollItem.js
 const PayrollRun = require('../models/PayrollRun');
 const PayrollItem = require('../models/PayrollItem');
 
-// PDF for payslip printing
-let PDFDocument;
-try {
-  PDFDocument = require('pdfkit');
-} catch (e) {
-  PDFDocument = null;
-}
-
+// helper
 const pad2 = (n) => String(n).padStart(2, '0');
 
-/**
- * =========================================
- * 1) HEADCOUNT (Org summary)
- * =========================================
- * GET /api/hr/headcount
- */
+// =========================
+// HEADCOUNT (HR ONLY)
+// =========================
 exports.getHeadcount = async (req, res) => {
   try {
-    // excluding Admin (optional)
     const users = await User.find({ role: { $ne: 'Admin' } }).select('role');
 
-    const summary = users.reduce(
-      (acc, u) => {
-        acc.total += 1;
-        acc.byRole[u.role] = (acc.byRole[u.role] || 0) + 1;
-        return acc;
-      },
-      { total: 0, byRole: {} }
-    );
+    const byRole = {};
+    for (const u of users) byRole[u.role] = (byRole[u.role] || 0) + 1;
 
-    res.json(summary);
+    res.json({
+      total: users.length,
+      byRole
+    });
   } catch (err) {
     console.error(err);
     res.status(500).send('Server Error');
   }
 };
 
-/**
- * =========================================
- * 2) ATTENDANCE HISTORY (TL + Agents)
- * =========================================
- * GET /api/hr/attendance/:userId?from=YYYY-MM-DD&to=YYYY-MM-DD
- */
+// =========================
+// ATTENDANCE HISTORY (HR ONLY)
+// =========================
 exports.getAttendanceHistory = async (req, res) => {
   try {
     const { userId } = req.params;
-    const { from, to } = req.query;
 
-    const target = await User.findById(userId).select('name role email');
-    if (!target) return res.status(404).json({ msg: 'User not found' });
-    if (target.role === 'Admin') return res.status(403).json({ msg: 'Forbidden' });
+    const rows = await Attendance.find({ user: userId })
+      .sort({ date: -1 })
+      .select('date isLate createdAt');
 
-    const query = { user: userId };
-    if (from && to) query.date = { $gte: from, $lte: to };
-
-    const records = await Attendance.find(query).sort({ date: -1 });
-
-    res.json({ user: target, records });
+    res.json(rows);
   } catch (err) {
     console.error(err);
     res.status(500).send('Server Error');
   }
 };
 
-/**
- * =========================================
- * 3) HR ORG CHART (Tree)
- * =========================================
- * HR (virtual root) -> All BranchManagers -> Their TeamLeads -> Their Employees
- *
- * GET /api/hr/org-chart
- */
+// =========================
+// ORG CHART (HR ONLY)
+// HR_ROOT -> All BMs -> their TLs -> their Employees
+// =========================
 exports.getOrgChart = async (req, res) => {
   try {
-    // fetch all BMs, TLs, Employees (ignore Admin)
     const users = await User.find({
       role: { $in: ['BranchManager', 'TeamLead', 'Employee'] }
     }).select('_id name role reportsTo branch');
 
-    // Build a lookup map: id => node
     const map = new Map();
     for (const u of users) {
       map.set(String(u._id), {
@@ -100,20 +67,17 @@ exports.getOrgChart = async (req, res) => {
       });
     }
 
-    // Attach each node to its parent (if parent exists in map)
     for (const node of map.values()) {
       if (node.reportsTo && map.has(node.reportsTo)) {
         map.get(node.reportsTo).children.push(node);
       }
     }
 
-    // Roots for HR view = all BranchManagers (even if their parent isn't in map)
     const branchManagers = [];
     for (const node of map.values()) {
       if (node.role === 'BranchManager') branchManagers.push(node);
     }
 
-    // Optional: sort children by role then name for stable chart
     const roleOrder = { BranchManager: 0, TeamLead: 1, Employee: 2 };
     const sortTree = (n) => {
       n.children.sort((a, b) => {
@@ -126,7 +90,6 @@ exports.getOrgChart = async (req, res) => {
     };
     branchManagers.forEach(sortTree);
 
-    // Virtual root for frontend tree components
     const tree = {
       _id: 'HR_ROOT',
       name: 'HR',
@@ -142,13 +105,11 @@ exports.getOrgChart = async (req, res) => {
   }
 };
 
-/**
- * =========================================
- * 4) PAYROLL: GENERATE (Draft)
- * =========================================
- * POST /api/hr/payroll/generate
- * Body: { month: 1-12, year: 2026, includeRoles?: ["TeamLead","Employee"] }
- */
+// =========================
+// PAYROLL (MANUAL)
+// IMS provides ONLY attendance.
+// HR fills salary/incentive/deduction/allowances manually.
+// =========================
 exports.generatePayroll = async (req, res) => {
   try {
     const { month, year, includeRoles } = req.body;
@@ -164,20 +125,20 @@ exports.generatePayroll = async (req, res) => {
       status: 'Draft'
     });
 
-    // default payroll for TL + Employee unless overridden
     const roles = Array.isArray(includeRoles) && includeRoles.length > 0
       ? includeRoles
       : ['TeamLead', 'Employee'];
 
     const users = await User.find({
       role: { $in: roles, $ne: 'Admin' }
-    }).select('name email role salary');
+    }).select('name email role');
 
     const monthStr = pad2(m);
     const prefix = `${y}-${monthStr}-`;
 
     const items = [];
     for (const u of users) {
+      // ✅ Attendance from IMS
       const attendanceRecords = await Attendance.find({
         user: u._id,
         date: { $regex: new RegExp(`^${prefix}`) }
@@ -186,37 +147,31 @@ exports.generatePayroll = async (req, res) => {
       const presentDays = attendanceRecords.length;
       const lateDays = attendanceRecords.filter(r => r.isLate).length;
 
-      // Simple penalty (customize)
-      const attendancePenalty = lateDays * 50;
-
-      const basic = Number(u.salary?.basic || 0);
-      const allowances = Number(u.salary?.allowances || 0);
-      const fixedDeduction = Number(u.salary?.deductions || 0);
-
-      const netPay = Math.max(0, basic + allowances - fixedDeduction - attendancePenalty);
-
       const payslipNumber = `PS-${y}${monthStr}-${String(u._id).slice(-6).toUpperCase()}`;
+
+      // ✅ manual starts empty
+      const manual = {
+        basicSalary: 0,
+        incentive: 0,
+        deduction: 0,
+        allowances: 0,
+        remarks: ''
+      };
 
       items.push({
         payrollRun: run._id,
         user: u._id,
-
         attendance: { presentDays, lateDays },
-
-        earnings: { basic, allowances },
-        deductions: { fixed: fixedDeduction, attendancePenalty },
-
-        netPay,
+        manual,
+        netPay: 0,
         payslipNumber
       });
     }
 
-    if (items.length > 0) {
-      await PayrollItem.insertMany(items);
-    }
+    if (items.length > 0) await PayrollItem.insertMany(items);
 
     res.json({
-      msg: 'Payroll generated (Draft)',
+      msg: 'Payroll generated (Draft). Attendance loaded, HR must fill salary manually.',
       runId: run._id,
       count: items.length
     });
@@ -226,21 +181,16 @@ exports.generatePayroll = async (req, res) => {
   }
 };
 
-/**
- * =========================================
- * 5) PAYROLL: VIEW RUN
- * =========================================
- * GET /api/hr/payroll/:runId
- */
 exports.getPayrollRun = async (req, res) => {
   try {
     const { runId } = req.params;
 
-    const run = await PayrollRun.findById(runId).populate('generatedBy', 'name role');
+    const run = await PayrollRun.findById(runId);
     if (!run) return res.status(404).json({ msg: 'Payroll run not found' });
 
     const items = await PayrollItem.find({ payrollRun: runId })
-      .populate('user', 'name email role');
+      .populate('user', 'name email role')
+      .sort({ createdAt: 1 });
 
     res.json({ run, items });
   } catch (err) {
@@ -249,12 +199,48 @@ exports.getPayrollRun = async (req, res) => {
   }
 };
 
-/**
- * =========================================
- * 6) PAYROLL: FINALIZE RUN
- * =========================================
- * POST /api/hr/payroll/:runId/finalize
- */
+exports.updatePayrollItem = async (req, res) => {
+  try {
+    const { payrollItemId } = req.params;
+
+    const item = await PayrollItem.findById(payrollItemId);
+    if (!item) return res.status(404).json({ msg: 'Payroll item not found' });
+
+    const run = await PayrollRun.findById(item.payrollRun);
+    if (run?.status === 'Finalized') {
+      return res.status(400).json({ msg: 'Payroll run is finalized. Cannot edit.' });
+    }
+
+    const incoming = req.body.manual || {};
+
+    item.manual = {
+      ...item.manual.toObject(),
+      ...incoming,
+      basicSalary: Number(incoming.basicSalary ?? item.manual.basicSalary ?? 0),
+      incentive: Number(incoming.incentive ?? item.manual.incentive ?? 0),
+      deduction: Number(incoming.deduction ?? item.manual.deduction ?? 0),
+      allowances: Number(incoming.allowances ?? item.manual.allowances ?? 0),
+      remarks: typeof incoming.remarks === 'string' ? incoming.remarks : (item.manual.remarks || '')
+    };
+
+    // ✅ auto netPay based on manual values
+    const basic = Number(item.manual.basicSalary || 0);
+    const incentive = Number(item.manual.incentive || 0);
+    const allowances = Number(item.manual.allowances || 0);
+    const deduction = Number(item.manual.deduction || 0);
+
+    item.netPay = Math.max(0, basic + incentive + allowances - deduction);
+
+    await item.save();
+
+    const populated = await PayrollItem.findById(item._id).populate('user', 'name email role');
+    res.json({ msg: 'Payroll item updated', item: populated });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('Server Error');
+  }
+};
+
 exports.finalizePayrollRun = async (req, res) => {
   try {
     const { runId } = req.params;
@@ -265,77 +251,44 @@ exports.finalizePayrollRun = async (req, res) => {
     run.status = 'Finalized';
     await run.save();
 
-    res.json({ msg: 'Payroll run finalized' });
+    res.json({ msg: 'Payroll run finalized', run });
   } catch (err) {
     console.error(err);
     res.status(500).send('Server Error');
   }
 };
 
-/**
- * =========================================
- * 7) PAYSLIP PDF (PRINT)
- * =========================================
- * GET /api/hr/payslip/:payrollItemId/pdf
- */
-exports.getPayslipPdf = async (req, res) => {
+// ✅ Payslip output (JSON). Frontend can print it.
+exports.getPayslip = async (req, res) => {
   try {
-    if (!PDFDocument) {
-      return res.status(500).json({ msg: 'pdfkit is not installed. Run: npm i pdfkit' });
-    }
-
     const { payrollItemId } = req.params;
 
-    const item = await PayrollItem.findById(payrollItemId)
-      .populate('user', 'name email role')
-      .populate('payrollRun');
+    const item = await PayrollItem.findById(payrollItemId).populate('user', 'name email role branch');
+    if (!item) return res.status(404).json({ msg: 'Payroll item not found' });
 
-    if (!item) return res.status(404).json({ msg: 'Payslip not found' });
+    const run = await PayrollRun.findById(item.payrollRun);
+    if (!run) return res.status(404).json({ msg: 'Payroll run not found' });
 
-    const { month, year } = item.payrollRun.period;
-    const periodLabel = `${pad2(month)}/${year}`;
-
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="${item.payslipNumber}.pdf"`);
-
-    const doc = new PDFDocument({ margin: 40 });
-    doc.pipe(res);
-
-    doc.fontSize(18).text('PAYSLIP', { align: 'center' });
-    doc.moveDown(0.5);
-
-    doc.fontSize(12).text(`Payslip No: ${item.payslipNumber}`);
-    doc.text(`Period: ${periodLabel}`);
-    doc.moveDown();
-
-    doc.fontSize(12).text(`Employee: ${item.user.name}`);
-    doc.text(`Role: ${item.user.role}`);
-    doc.text(`Email: ${item.user.email}`);
-    doc.moveDown();
-
-    doc.fontSize(12).text('Attendance');
-    doc.text(`Present Days: ${item.attendance.presentDays}`);
-    doc.text(`Late Days: ${item.attendance.lateDays}`);
-    doc.moveDown();
-
-    doc.fontSize(12).text('Earnings');
-    doc.text(`Basic: ${item.earnings.basic}`);
-    doc.text(`Allowances: ${item.earnings.allowances}`);
-    doc.moveDown();
-
-    doc.fontSize(12).text('Deductions');
-    doc.text(`Fixed: ${item.deductions.fixed}`);
-    doc.text(`Attendance Penalty: ${item.deductions.attendancePenalty}`);
-    doc.moveDown();
-
-    doc.fontSize(14).text(`Net Pay: ${item.netPay}`, { underline: true });
-    doc.moveDown(2);
-
-    doc.fontSize(10).text('This is a system generated payslip.', { align: 'center' });
-
-    doc.end();
+    return res.json({
+      payslipNumber: item.payslipNumber,
+      period: run.period, // { month, year }
+      user: item.user, // { name, email, role, branch }
+      attendance: {
+        presentDays: item.attendance?.presentDays ?? 0,
+        lateDays: item.attendance?.lateDays ?? 0
+      },
+      manual: {
+        basicSalary: item.manual?.basicSalary ?? 0,
+        allowances: item.manual?.allowances ?? 0,
+        incentive: item.manual?.incentive ?? 0,
+        deduction: item.manual?.deduction ?? 0,
+        remarks: item.manual?.remarks ?? ''
+      },
+      netPay: item.netPay ?? 0,
+      createdAt: item.createdAt
+    });
   } catch (err) {
     console.error(err);
-    res.status(500).send('Server Error');
+    return res.status(500).send('Server Error');
   }
 };

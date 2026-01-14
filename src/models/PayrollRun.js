@@ -3,16 +3,15 @@ const mongoose = require('mongoose');
 const PayrollRunSchema = new mongoose.Schema(
   {
     period: {
-      month: { type: Number, required: true, min: 1, max: 12 },
+      month: { type: Number, required: true }, // 1-12
       year: { type: Number, required: true }
     },
-    status: { type: String, enum: ['Draft', 'Finalized'], default: 'Draft' },
     generatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    notes: { type: String, default: '' }
+    status: { type: String, enum: ['Draft', 'Finalized'], default: 'Draft' }
   },
   { timestamps: true }
 );
 
-PayrollRunSchema.index({ 'period.month': 1, 'period.year': 1 }, { unique: false });
+PayrollRunSchema.index({ 'period.month': 1, 'period.year': 1 });
 
 module.exports = mongoose.model('PayrollRun', PayrollRunSchema);

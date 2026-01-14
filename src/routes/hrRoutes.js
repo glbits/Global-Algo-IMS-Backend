@@ -5,31 +5,20 @@ const auth = require('../middleware/auth');
 const { authorizeRoles } = require('../middleware/rbac');
 const hr = require('../controllers/hrController');
 
-// HR-level access (Admin, BranchManager, HR)
-const HR_ALLOWED = authorizeRoles('Admin', 'BranchManager', 'HR');
+const HR_ONLY = authorizeRoles('HR');
 
-/**
- * ==============================
- * HR DASHBOARD ROUTES
- * Base path: /api/hr
- * ==============================
- */
+// HR ONLY
+router.get('/headcount', auth, HR_ONLY, hr.getHeadcount);
+router.get('/org-chart', auth, HR_ONLY, hr.getOrgChart);
+router.get('/attendance/:userId', auth, HR_ONLY, hr.getAttendanceHistory);
 
-// --- HEADCOUNT ---
-router.get('/headcount', auth, HR_ALLOWED, hr.getHeadcount);
+// Payroll (manual)
+router.post('/payroll/generate', auth, HR_ONLY, hr.generatePayroll);
+router.get('/payroll/:runId', auth, HR_ONLY, hr.getPayrollRun);
+router.patch('/payroll/item/:payrollItemId', auth, HR_ONLY, hr.updatePayrollItem);
+router.post('/payroll/:runId/finalize', auth, HR_ONLY, hr.finalizePayrollRun);
 
-// --- ORG CHART (HR -> BM -> TL -> EMP) ---
-router.get('/org-chart', auth, HR_ALLOWED, hr.getOrgChart);
-
-// --- ATTENDANCE HISTORY (TL + Agents) ---
-router.get('/attendance/:userId', auth, HR_ALLOWED, hr.getAttendanceHistory);
-
-// --- PAYROLL ---
-router.post('/payroll/generate', auth, HR_ALLOWED, hr.generatePayroll);
-router.get('/payroll/:runId', auth, HR_ALLOWED, hr.getPayrollRun);
-router.post('/payroll/:runId/finalize', auth, HR_ALLOWED, hr.finalizePayrollRun);
-
-// --- PAYSLIP PDF ---
-router.get('/payslip/:payrollItemId/pdf', auth, HR_ALLOWED, hr.getPayslipPdf);
+// ✅ Payslip JSON
+router.get('/payslip/:payrollItemId', auth, HR_ONLY, hr.getPayslip);
 
 module.exports = router;
