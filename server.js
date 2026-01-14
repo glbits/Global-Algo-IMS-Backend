@@ -7,7 +7,7 @@ const app = express();
 
 app.use(express.json());
 app.use(cors({
-  origin: ["http://localhost:5173", "http://localhost:5174", process.env.FRONTEND_URL],
+  origin: ["http://localhost:5173", "http://localhost:5174", process.env.FRONTEND_URL], 
   credentials: true
 }));
 
@@ -24,8 +24,9 @@ app.use('/api/tickets', require('./src/routes/ticketRoutes'));
 app.use('/api/tasks', require('./src/routes/taskRoutes'));
 app.use('/api/dashboard', require('./src/routes/dashboardRoutes'));
 
-// ✅ HR Routes
+// Combined Conflict: Keep BOTH routes
 app.use('/api/hr', require('./src/routes/hrRoutes'));
+app.use('/api/calendar', require('./src/routes/calendar'));
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
