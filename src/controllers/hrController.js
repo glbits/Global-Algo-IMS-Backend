@@ -3,9 +3,65 @@ const User = require('../models/User');
 const Attendance = require('../models/Attendance');
 const PayrollRun = require('../models/PayrollRun');
 const PayrollItem = require('../models/PayrollItem');
+const PDFDocument = require('pdfkit');
 
-// helper
 const pad2 = (n) => String(n).padStart(2, '0');
+
+const daysInMonth = (year, month1to12) => new Date(year, month1to12, 0).getDate();
+
+// Counts attendance days from Attendance collection.
+// Online/On-call/Break/Lunch/Evaluation => 1 day
+// Paid Leave => 1 day
+// Half Day => 0.5 day
+// Offline => 0 day
+const computeAttendanceStats = async (userId, year, month) => {
+  const prefix = `${year}-${pad2(month)}-`;
+
+  const records = await Attendance.find({
+    user: userId,
+    date: { $regex: new RegExp(`^${prefix}`) }
+  }).select('currentStatus isLate');
+
+  const lateDays = records.filter(r => r.isLate).length;
+
+  let attendanceDays = 0;
+  let presentDays = 0;
+
+  for (const r of records) {
+    const st = r.currentStatus;
+
+    if (st === 'Half Day') {
+      attendanceDays += 0.5;
+      presentDays += 0.5;
+    } else if (st === 'Paid Leave') {
+      attendanceDays += 1;
+      presentDays += 1;
+    } else if (st && st !== 'Offline') {
+      attendanceDays += 1;
+      presentDays += 1;
+    }
+  }
+
+  return { presentDays, lateDays, attendanceDays };
+};
+
+const recalcPayroll = (item) => {
+  const wd = Number(item.attendance?.workingDays || 0);
+  const ad = Number(item.attendance?.attendanceDays || 0);
+
+  const basic = Number(item.manual?.basicSalary || 0);
+  const incentive = Number(item.manual?.incentive || 0);
+  const allowances = Number(item.manual?.allowances || 0);
+  const deduction = Number(item.manual?.deduction || 0);
+
+  const gross = wd > 0 ? Math.round((basic * ad) / wd) : 0;
+  const net = Math.max(0, Math.round(gross + incentive + allowances - deduction));
+
+  item.grossSalary = gross;
+  item.netPay = net;
+
+  item.attendance.absentDays = Math.max(0, wd - ad);
+};
 
 // =========================
 // HEADCOUNT (HR ONLY)
@@ -17,10 +73,20 @@ exports.getHeadcount = async (req, res) => {
     const byRole = {};
     for (const u of users) byRole[u.role] = (byRole[u.role] || 0) + 1;
 
-    res.json({
-      total: users.length,
-      byRole
-    });
+    res.json({ total: users.length, byRole });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('Server Error');
+  }
+};
+
+// =========================
+// ORG CHART (HR ONLY)
+// =========================
+exports.getOrgChart = async (req, res) => {
+  try {
+    const users = await User.find({ role: { $ne: 'Admin' } }).select('name email role reportingTo');
+    res.json(users);
   } catch (err) {
     console.error(err);
     res.status(500).send('Server Error');
@@ -34,11 +100,8 @@ exports.getAttendanceHistory = async (req, res) => {
   try {
     const { userId } = req.params;
 
-    const rows = await Attendance.find({ user: userId })
-      .sort({ date: -1 })
-      .select('date isLate createdAt');
-
-    res.json(rows);
+    const attendance = await Attendance.find({ user: userId }).sort({ date: -1 }).limit(60);
+    res.json(attendance);
   } catch (err) {
     console.error(err);
     res.status(500).send('Server Error');
@@ -46,69 +109,7 @@ exports.getAttendanceHistory = async (req, res) => {
 };
 
 // =========================
-// ORG CHART (HR ONLY)
-// HR_ROOT -> All BMs -> their TLs -> their Employees
-// =========================
-exports.getOrgChart = async (req, res) => {
-  try {
-    const users = await User.find({
-      role: { $in: ['BranchManager', 'TeamLead', 'Employee'] }
-    }).select('_id name role reportsTo branch');
-
-    const map = new Map();
-    for (const u of users) {
-      map.set(String(u._id), {
-        _id: String(u._id),
-        name: u.name,
-        role: u.role,
-        branch: u.branch || '',
-        reportsTo: u.reportsTo ? String(u.reportsTo) : null,
-        children: []
-      });
-    }
-
-    for (const node of map.values()) {
-      if (node.reportsTo && map.has(node.reportsTo)) {
-        map.get(node.reportsTo).children.push(node);
-      }
-    }
-
-    const branchManagers = [];
-    for (const node of map.values()) {
-      if (node.role === 'BranchManager') branchManagers.push(node);
-    }
-
-    const roleOrder = { BranchManager: 0, TeamLead: 1, Employee: 2 };
-    const sortTree = (n) => {
-      n.children.sort((a, b) => {
-        const ra = roleOrder[a.role] ?? 9;
-        const rb = roleOrder[b.role] ?? 9;
-        if (ra !== rb) return ra - rb;
-        return (a.name || '').localeCompare(b.name || '');
-      });
-      n.children.forEach(sortTree);
-    };
-    branchManagers.forEach(sortTree);
-
-    const tree = {
-      _id: 'HR_ROOT',
-      name: 'HR',
-      role: 'HR',
-      branch: '',
-      children: branchManagers
-    };
-
-    res.json(tree);
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Server Error');
-  }
-};
-
-// =========================
-// PAYROLL (MANUAL)
-// IMS provides ONLY attendance.
-// HR fills salary/incentive/deduction/allowances manually.
+// PAYROLL (Manual parameters like your sheet)
 // =========================
 exports.generatePayroll = async (req, res) => {
   try {
@@ -129,49 +130,52 @@ exports.generatePayroll = async (req, res) => {
       ? includeRoles
       : ['TeamLead', 'Employee'];
 
+    // Prefill salary if your User model has salary.basic / salary.allowances (safe if absent)
     const users = await User.find({
       role: { $in: roles, $ne: 'Admin' }
-    }).select('name email role');
+    }).select('name email role branch salary');
 
+    const workingDays = daysInMonth(y, m);
     const monthStr = pad2(m);
-    const prefix = `${y}-${monthStr}-`;
 
     const items = [];
-    for (const u of users) {
-      // ✅ Attendance from IMS
-      const attendanceRecords = await Attendance.find({
-        user: u._id,
-        date: { $regex: new RegExp(`^${prefix}`) }
-      }).select('isLate');
 
-      const presentDays = attendanceRecords.length;
-      const lateDays = attendanceRecords.filter(r => r.isLate).length;
+    for (const u of users) {
+      const stats = await computeAttendanceStats(u._id, y, m);
 
       const payslipNumber = `PS-${y}${monthStr}-${String(u._id).slice(-6).toUpperCase()}`;
 
-      // ✅ manual starts empty
-      const manual = {
-        basicSalary: 0,
-        incentive: 0,
-        deduction: 0,
-        allowances: 0,
-        remarks: ''
-      };
-
-      items.push({
+      const item = new PayrollItem({
         payrollRun: run._id,
         user: u._id,
-        attendance: { presentDays, lateDays },
-        manual,
+        attendance: {
+          presentDays: stats.presentDays,
+          lateDays: stats.lateDays,
+          attendanceDays: stats.attendanceDays,
+          workingDays,
+          absentDays: Math.max(0, workingDays - stats.attendanceDays)
+        },
+        manual: {
+          designation: '',
+          basicSalary: Number(u.salary?.basic || 0),
+          incentive: 0,
+          deduction: 0,
+          allowances: Number(u.salary?.allowances || 0),
+          remarks: ''
+        },
+        grossSalary: 0,
         netPay: 0,
         payslipNumber
       });
+
+      recalcPayroll(item);
+      items.push(item);
     }
 
     if (items.length > 0) await PayrollItem.insertMany(items);
 
     res.json({
-      msg: 'Payroll generated (Draft). Attendance loaded, HR must fill salary manually.',
+      msg: 'Payroll generated (Draft). Attendance loaded, HR can edit working days/attendance and salary fields.',
       runId: run._id,
       count: items.length
     });
@@ -189,7 +193,7 @@ exports.getPayrollRun = async (req, res) => {
     if (!run) return res.status(404).json({ msg: 'Payroll run not found' });
 
     const items = await PayrollItem.find({ payrollRun: runId })
-      .populate('user', 'name email role')
+      .populate('user', 'name email role branch')
       .sort({ createdAt: 1 });
 
     res.json({ run, items });
@@ -211,29 +215,35 @@ exports.updatePayrollItem = async (req, res) => {
       return res.status(400).json({ msg: 'Payroll run is finalized. Cannot edit.' });
     }
 
-    const incoming = req.body.manual || {};
+    const incomingManual = req.body.manual || {};
+    const incomingAtt = req.body.attendance || {};
 
+    // Manual (HR input)
     item.manual = {
       ...item.manual.toObject(),
-      ...incoming,
-      basicSalary: Number(incoming.basicSalary ?? item.manual.basicSalary ?? 0),
-      incentive: Number(incoming.incentive ?? item.manual.incentive ?? 0),
-      deduction: Number(incoming.deduction ?? item.manual.deduction ?? 0),
-      allowances: Number(incoming.allowances ?? item.manual.allowances ?? 0),
-      remarks: typeof incoming.remarks === 'string' ? incoming.remarks : (item.manual.remarks || '')
+      ...incomingManual,
+      designation: typeof incomingManual.designation === 'string' ? incomingManual.designation : (item.manual.designation || ''),
+      basicSalary: Number(incomingManual.basicSalary ?? item.manual.basicSalary ?? 0),
+      incentive: Number(incomingManual.incentive ?? item.manual.incentive ?? 0),
+      deduction: Number(incomingManual.deduction ?? item.manual.deduction ?? 0),
+      allowances: Number(incomingManual.allowances ?? item.manual.allowances ?? 0),
+      remarks: typeof incomingManual.remarks === 'string' ? incomingManual.remarks : (item.manual.remarks || '')
     };
 
-    // ✅ auto netPay based on manual values
-    const basic = Number(item.manual.basicSalary || 0);
-    const incentive = Number(item.manual.incentive || 0);
-    const allowances = Number(item.manual.allowances || 0);
-    const deduction = Number(item.manual.deduction || 0);
+    // Attendance overrides (HR input like your sheet)
+    item.attendance = {
+      ...item.attendance.toObject(),
+      ...incomingAtt,
+      workingDays: Number(incomingAtt.workingDays ?? item.attendance.workingDays ?? 0),
+      attendanceDays: Number(incomingAtt.attendanceDays ?? item.attendance.attendanceDays ?? 0),
+      absentDays: Number(item.attendance?.absentDays || 0)
+    };
 
-    item.netPay = Math.max(0, basic + incentive + allowances - deduction);
+    recalcPayroll(item);
 
     await item.save();
 
-    const populated = await PayrollItem.findById(item._id).populate('user', 'name email role');
+    const populated = await PayrollItem.findById(item._id).populate('user', 'name email role branch');
     res.json({ msg: 'Payroll item updated', item: populated });
   } catch (err) {
     console.error(err);
@@ -258,7 +268,7 @@ exports.finalizePayrollRun = async (req, res) => {
   }
 };
 
-// ✅ Payslip output (JSON). Frontend can print it.
+// ✅ Payslip output (JSON)
 exports.getPayslip = async (req, res) => {
   try {
     const { payrollItemId } = req.params;
@@ -269,24 +279,118 @@ exports.getPayslip = async (req, res) => {
     const run = await PayrollRun.findById(item.payrollRun);
     if (!run) return res.status(404).json({ msg: 'Payroll run not found' });
 
+    recalcPayroll(item);
+
     return res.json({
       payslipNumber: item.payslipNumber,
-      period: run.period, // { month, year }
-      user: item.user, // { name, email, role, branch }
+      period: run.period,
+      user: item.user,
       attendance: {
+        workingDays: item.attendance?.workingDays ?? 0,
+        attendanceDays: item.attendance?.attendanceDays ?? 0,
+        absentDays: item.attendance?.absentDays ?? 0,
         presentDays: item.attendance?.presentDays ?? 0,
         lateDays: item.attendance?.lateDays ?? 0
       },
       manual: {
+        designation: item.manual?.designation ?? '',
         basicSalary: item.manual?.basicSalary ?? 0,
         allowances: item.manual?.allowances ?? 0,
         incentive: item.manual?.incentive ?? 0,
         deduction: item.manual?.deduction ?? 0,
         remarks: item.manual?.remarks ?? ''
       },
+      grossSalary: item.grossSalary ?? 0,
       netPay: item.netPay ?? 0,
       createdAt: item.createdAt
     });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).send('Server Error');
+  }
+};
+
+// ✅ Payslip PDF
+exports.getPayslipPdf = async (req, res) => {
+  try {
+    const { payrollItemId } = req.params;
+
+    const item = await PayrollItem.findById(payrollItemId).populate('user', 'name email role branch');
+    if (!item) return res.status(404).json({ msg: 'Payroll item not found' });
+
+    const run = await PayrollRun.findById(item.payrollRun);
+    if (!run) return res.status(404).json({ msg: 'Payroll run not found' });
+
+    recalcPayroll(item);
+
+    const periodStr = `${pad2(run.period.month)}/${run.period.year}`;
+    const filename = `${item.payslipNumber}-${periodStr.replace('/', '-')}.pdf`;
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+
+    const doc = new PDFDocument({ size: 'A4', margin: 40 });
+    doc.pipe(res);
+
+    doc.fontSize(18).text('PAYSLIP', { align: 'center' });
+    doc.moveDown(0.5);
+    doc.fontSize(11).text(`Payslip No: ${item.payslipNumber}`, { align: 'right' });
+    doc.fontSize(11).text(`Period: ${periodStr}`, { align: 'right' });
+    doc.moveDown();
+
+    doc.fontSize(12).text('Employee Details', { underline: true });
+    doc.moveDown(0.5);
+    doc.fontSize(11)
+      .text(`Name: ${item.user?.name || '—'}`)
+      .text(`Email: ${item.user?.email || '—'}`)
+      .text(`Role: ${item.user?.role || '—'}`)
+      .text(`Designation: ${item.manual?.designation || '—'}`)
+      .text(`Branch: ${item.user?.branch || '—'}`);
+    doc.moveDown();
+
+    doc.fontSize(12).text('Attendance Summary', { underline: true });
+    doc.moveDown(0.5);
+    doc.fontSize(11)
+      .text(`Working Days: ${Number(item.attendance?.workingDays || 0)}`)
+      .text(`Attendance Days: ${Number(item.attendance?.attendanceDays || 0)}`)
+      .text(`Absent Days: ${Number(item.attendance?.absentDays || 0)}`)
+      .text(`Late Days: ${Number(item.attendance?.lateDays || 0)}`);
+    doc.moveDown();
+
+    doc.fontSize(12).text('Salary Breakdown', { underline: true });
+    doc.moveDown(0.5);
+
+    const basic = Number(item.manual?.basicSalary || 0);
+    const gross = Number(item.grossSalary || 0);
+    const incentive = Number(item.manual?.incentive || 0);
+    const allowances = Number(item.manual?.allowances || 0);
+    const deduction = Number(item.manual?.deduction || 0);
+    const net = Number(item.netPay || 0);
+
+    const row = (label, value) => {
+      doc.fontSize(11).text(label, { continued: true });
+      doc.fontSize(11).text(String(value), { align: 'right' });
+    };
+
+    row('Basic Salary', basic);
+    row('Gross Salary (Basic × Attendance/Working)', gross);
+    row('Incentive', incentive);
+    row('Allowances', allowances);
+    row('Deduction', deduction);
+
+    doc.moveDown(0.5);
+    doc.fontSize(12).text(`Final Salary: ${net}`, { align: 'right' });
+    doc.moveDown();
+
+    if (item.manual?.remarks) {
+      doc.fontSize(12).text('Remarks', { underline: true });
+      doc.moveDown(0.5);
+      doc.fontSize(11).text(item.manual.remarks);
+      doc.moveDown();
+    }
+
+    doc.fontSize(10).text('This is a system generated payslip.', { align: 'center' });
+    doc.end();
   } catch (err) {
     console.error(err);
     return res.status(500).send('Server Error');

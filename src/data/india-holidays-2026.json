@@ -1,0 +1,587 @@
+[
+  {
+    "date": "2026-01-01",
+    "localName": "New Year’s Day",
+    "name": "New Year’s Day"
+  },
+  {
+    "date": "2026-01-03",
+    "localName": "Hazrat Ali Birthday",
+    "name": "Hazrat Ali Birthday"
+  },
+  {
+    "date": "2026-01-04",
+    "localName": "Sunday",
+    "name": "Sunday"
+  },
+  {
+    "date": "2026-01-05",
+    "localName": "Guru Gobind Singh Jayanti",
+    "name": "Guru Gobind Singh Jayanti"
+  },
+  {
+    "date": "2026-01-10",
+    "localName": "Tailang Swami Jayanti / Second Saturday",
+    "name": "Tailang Swami Jayanti / Second Saturday"
+  },
+  {
+    "date": "2026-01-11",
+    "localName": "Sunday",
+    "name": "Sunday"
+  },
+  {
+    "date": "2026-01-13",
+    "localName": "Lohri",
+    "name": "Lohri"
+  },
+  {
+    "date": "2026-01-14",
+    "localName": "Makar Sankranti / Pongal / Uttarayan / Magha Bihu",
+    "name": "Makar Sankranti / Pongal / Uttarayan / Magha Bihu"
+  },
+  {
+    "date": "2026-01-15",
+    "localName": "Thiruvalluvar Day",
+    "name": "Thiruvalluvar Day"
+  },
+  {
+    "date": "2026-01-16",
+    "localName": "Kaanum Pongal",
+    "name": "Kaanum Pongal"
+  },
+  {
+    "date": "2026-01-18",
+    "localName": "Army Day / Sunday",
+    "name": "Army Day / Sunday"
+  },
+  {
+    "date": "2026-01-23",
+    "localName": "Basant Panchami / Saraswati Puja / Netaji Jayanti / Parakram Diwas",
+    "name": "Basant Panchami / Saraswati Puja / Netaji Jayanti / Parakram Diwas"
+  },
+  {
+    "date": "2026-01-25",
+    "localName": "Sunday",
+    "name": "Sunday"
+  },
+  {
+    "date": "2026-01-26",
+    "localName": "Republic Day",
+    "name": "Republic Day"
+  },
+  {
+    "date": "2026-01-30",
+    "localName": "Shaheed Diwas",
+    "name": "Shaheed Diwas"
+  },
+  {
+    "date": "2026-02-01",
+    "localName": "Guru Ravidas Jayanti / Sunday",
+    "name": "Guru Ravidas Jayanti / Sunday"
+  },
+  {
+    "date": "2026-02-08",
+    "localName": "Sunday",
+    "name": "Sunday"
+  },
+  {
+    "date": "2026-02-12",
+    "localName": "Maharishi Dayanand Saraswati Jayanti",
+    "name": "Maharishi Dayanand Saraswati Jayanti"
+  },
+  {
+    "date": "2026-02-14",
+    "localName": "Second Saturday",
+    "name": "Second Saturday"
+  },
+  {
+    "date": "2026-02-15",
+    "localName": "Maha Shivaratri / Sunday",
+    "name": "Maha Shivaratri / Sunday"
+  },
+  {
+    "date": "2026-02-18",
+    "localName": "Losar",
+    "name": "Losar"
+  },
+  {
+    "date": "2026-02-22",
+    "localName": "Sunday",
+    "name": "Sunday"
+  },
+  {
+    "date": "2026-03-01",
+    "localName": "Sunday",
+    "name": "Sunday"
+  },
+  {
+    "date": "2026-03-03",
+    "localName": "Holika Dahan",
+    "name": "Holika Dahan"
+  },
+  {
+    "date": "2026-03-04",
+    "localName": "Holi / Dol Jatra / Hola Mohalla",
+    "name": "Holi / Dol Jatra / Hola Mohalla"
+  },
+  {
+    "date": "2026-03-06",
+    "localName": "Phaguwa",
+    "name": "Phaguwa"
+  },
+  {
+    "date": "2026-03-08",
+    "localName": "Sunday",
+    "name": "Sunday"
+  },
+  {
+    "date": "2026-03-14",
+    "localName": "Second Saturday",
+    "name": "Second Saturday"
+  },
+  {
+    "date": "2026-03-15",
+    "localName": "Sunday",
+    "name": "Sunday"
+  },
+  {
+    "date": "2026-03-19",
+    "localName": "Chaitra Navratri Begins / Ugadi / Gudi Padwa",
+    "name": "Chaitra Navratri Begins / Ugadi / Gudi Padwa"
+  },
+  {
+    "date": "2026-03-20",
+    "localName": "Cheti Chand",
+    "name": "Cheti Chand"
+  },
+  {
+    "date": "2026-03-21",
+    "localName": "Eid-ul-Fitr",
+    "name": "Eid-ul-Fitr"
+  },
+  {
+    "date": "2026-03-22",
+    "localName": "Sunday",
+    "name": "Sunday"
+  },
+  {
+    "date": "2026-03-24",
+    "localName": "Gangaur",
+    "name": "Gangaur"
+  },
+  {
+    "date": "2026-03-26",
+    "localName": "Rama Navami",
+    "name": "Rama Navami"
+  },
+  {
+    "date": "2026-03-27",
+    "localName": "Cheti Chhath",
+    "name": "Cheti Chhath"
+  },
+  {
+    "date": "2026-03-29",
+    "localName": "Sunday",
+    "name": "Sunday"
+  },
+  {
+    "date": "2026-03-31",
+    "localName": "Mahavir Jayanti",
+    "name": "Mahavir Jayanti"
+  },
+  {
+    "date": "2026-04-01",
+    "localName": "Hanuman Jayanti",
+    "name": "Hanuman Jayanti"
+  },
+  {
+    "date": "2026-04-03",
+    "localName": "Good Friday",
+    "name": "Good Friday"
+  },
+  {
+    "date": "2026-04-05",
+    "localName": "Easter / Sunday",
+    "name": "Easter / Sunday"
+  },
+  {
+    "date": "2026-04-11",
+    "localName": "Second Saturday",
+    "name": "Second Saturday"
+  },
+  {
+    "date": "2026-04-12",
+    "localName": "Sunday",
+    "name": "Sunday"
+  },
+  {
+    "date": "2026-04-14",
+    "localName": "Vaisakhi / Ambedkar Jayanti / Bohag Bihu / Vishu / Puthandu",
+    "name": "Vaisakhi / Ambedkar Jayanti / Bohag Bihu / Vishu / Puthandu"
+  },
+  {
+    "date": "2026-04-15",
+    "localName": "Pohela Boishakh",
+    "name": "Pohela Boishakh"
+  },
+  {
+    "date": "2026-04-16",
+    "localName": "Akshaya Tritiya",
+    "name": "Akshaya Tritiya"
+  },
+  {
+    "date": "2026-04-21",
+    "localName": "Basava Jayanti",
+    "name": "Basava Jayanti"
+  },
+  {
+    "date": "2026-04-26",
+    "localName": "Sunday",
+    "name": "Sunday"
+  },
+  {
+    "date": "2026-05-01",
+    "localName": "Labour Day / Maharashtra Day / Buddha Purnima",
+    "name": "Labour Day / Maharashtra Day / Buddha Purnima"
+  },
+  {
+    "date": "2026-05-03",
+    "localName": "Sunday",
+    "name": "Sunday"
+  },
+  {
+    "date": "2026-05-09",
+    "localName": "Rabindranath Tagore Jayanti / Second Saturday",
+    "name": "Rabindranath Tagore Jayanti / Second Saturday"
+  },
+  {
+    "date": "2026-05-10",
+    "localName": "Sunday",
+    "name": "Sunday"
+  },
+  {
+    "date": "2026-05-17",
+    "localName": "Sunday",
+    "name": "Sunday"
+  },
+  {
+    "date": "2026-05-24",
+    "localName": "Sunday",
+    "name": "Sunday"
+  },
+  {
+    "date": "2026-05-31",
+    "localName": "Sunday",
+    "name": "Sunday"
+  },
+  {
+    "date": "2026-06-07",
+    "localName": "Sunday",
+    "name": "Sunday"
+  },
+  {
+    "date": "2026-06-13",
+    "localName": "Second Saturday",
+    "name": "Second Saturday"
+  },
+  {
+    "date": "2026-06-14",
+    "localName": "Sunday",
+    "name": "Sunday"
+  },
+  {
+    "date": "2026-06-16",
+    "localName": "Martyrdom of Guru Arjan Dev",
+    "name": "Martyrdom of Guru Arjan Dev"
+  },
+  {
+    "date": "2026-06-21",
+    "localName": "International Yoga Day / Sunday",
+    "name": "International Yoga Day / Sunday"
+  },
+  {
+    "date": "2026-06-26",
+    "localName": "Muharram",
+    "name": "Muharram"
+  },
+  {
+    "date": "2026-06-28",
+    "localName": "Sunday",
+    "name": "Sunday"
+  },
+  {
+    "date": "2026-07-03",
+    "localName": "Rath Yatra",
+    "name": "Rath Yatra"
+  },
+  {
+    "date": "2026-07-05",
+    "localName": "Sunday",
+    "name": "Sunday"
+  },
+  {
+    "date": "2026-07-11",
+    "localName": "Second Saturday",
+    "name": "Second Saturday"
+  },
+  {
+    "date": "2026-07-12",
+    "localName": "Sunday",
+    "name": "Sunday"
+  },
+  {
+    "date": "2026-07-16",
+    "localName": "Guru Purnima",
+    "name": "Guru Purnima"
+  },
+  {
+    "date": "2026-07-19",
+    "localName": "Sunday",
+    "name": "Sunday"
+  },
+  {
+    "date": "2026-07-25",
+    "localName": "Nag Panchami",
+    "name": "Nag Panchami"
+  },
+  {
+    "date": "2026-07-26",
+    "localName": "Sunday",
+    "name": "Sunday"
+  },
+  {
+    "date": "2026-08-02",
+    "localName": "Sunday",
+    "name": "Sunday"
+  },
+  {
+    "date": "2026-08-09",
+    "localName": "Raksha Bandhan / Sunday",
+    "name": "Raksha Bandhan / Sunday"
+  },
+  {
+    "date": "2026-08-08",
+    "localName": "Second Saturday",
+    "name": "Second Saturday"
+  },
+  {
+    "date": "2026-08-15",
+    "localName": "Independence Day / Parsi New Year / Hariyali Teej",
+    "name": "Independence Day / Parsi New Year / Hariyali Teej"
+  },
+  {
+    "date": "2026-08-16",
+    "localName": "Janmashtami / Sunday",
+    "name": "Janmashtami / Sunday"
+  },
+  {
+    "date": "2026-08-19",
+    "localName": "Tulsidas Jayanti",
+    "name": "Tulsidas Jayanti"
+  },
+  {
+    "date": "2026-08-23",
+    "localName": "Sunday",
+    "name": "Sunday"
+  },
+  {
+    "date": "2026-08-26",
+    "localName": "Milad-un-Nabi / Onam",
+    "name": "Milad-un-Nabi / Onam"
+  },
+  {
+    "date": "2026-08-28",
+    "localName": "Varalakshmi Vrat",
+    "name": "Varalakshmi Vrat"
+  },
+  {
+    "date": "2026-08-31",
+    "localName": "Kajari Teej",
+    "name": "Kajari Teej"
+  },
+  {
+    "date": "2026-09-06",
+    "localName": "Sunday",
+    "name": "Sunday"
+  },
+  {
+    "date": "2026-09-07",
+    "localName": "Hartalika Teej",
+    "name": "Hartalika Teej"
+  },
+  {
+    "date": "2026-09-12",
+    "localName": "Second Saturday",
+    "name": "Second Saturday"
+  },
+  {
+    "date": "2026-09-13",
+    "localName": "Sunday",
+    "name": "Sunday"
+  },
+  {
+    "date": "2026-09-14",
+    "localName": "Ganesh Chaturthi",
+    "name": "Ganesh Chaturthi"
+  },
+  {
+    "date": "2026-09-17",
+    "localName": "Anant Chaturdashi",
+    "name": "Anant Chaturdashi"
+  },
+  {
+    "date": "2026-09-20",
+    "localName": "Sunday",
+    "name": "Sunday"
+  },
+  {
+    "date": "2026-09-22",
+    "localName": "Shardiya Navratri Begins",
+    "name": "Shardiya Navratri Begins"
+  },
+  {
+    "date": "2026-09-27",
+    "localName": "Sunday",
+    "name": "Sunday"
+  },
+  {
+    "date": "2026-10-02",
+    "localName": "Gandhi Jayanti",
+    "name": "Gandhi Jayanti"
+  },
+  {
+    "date": "2026-10-04",
+    "localName": "Sunday",
+    "name": "Sunday"
+  },
+  {
+    "date": "2026-10-09",
+    "localName": "Maha Navami",
+    "name": "Maha Navami"
+  },
+  {
+    "date": "2026-10-10",
+    "localName": "Second Saturday",
+    "name": "Second Saturday"
+  },
+  {
+    "date": "2026-10-11",
+    "localName": "Sunday",
+    "name": "Sunday"
+  },
+  {
+    "date": "2026-10-18",
+    "localName": "Sunday",
+    "name": "Sunday"
+  },
+  {
+    "date": "2026-10-20",
+    "localName": "Dussehra",
+    "name": "Dussehra"
+  },
+  {
+    "date": "2026-10-24",
+    "localName": "Kojagiri Purnima",
+    "name": "Kojagiri Purnima"
+  },
+  {
+    "date": "2026-10-25",
+    "localName": "Sunday",
+    "name": "Sunday"
+  },
+  {
+    "date": "2026-10-31",
+    "localName": "Sardar Vallabhbhai Patel Jayanti",
+    "name": "Sardar Vallabhbhai Patel Jayanti"
+  },
+  {
+    "date": "2026-11-01",
+    "localName": "Sunday",
+    "name": "Sunday"
+  },
+  {
+    "date": "2026-11-08",
+    "localName": "Diwali / Sunday",
+    "name": "Diwali / Sunday"
+  },
+  {
+    "date": "2026-11-09",
+    "localName": "Govardhan Puja",
+    "name": "Govardhan Puja"
+  },
+  {
+    "date": "2026-11-10",
+    "localName": "Vishwakarma Puja",
+    "name": "Vishwakarma Puja"
+  },
+  {
+    "date": "2026-11-11",
+    "localName": "Bhai Dooj",
+    "name": "Bhai Dooj"
+  },
+  {
+    "date": "2026-11-14",
+    "localName": "Second Saturday",
+    "name": "Second Saturday"
+  },
+  {
+    "date": "2026-11-15",
+    "localName": "Chhath Puja / Sunday",
+    "name": "Chhath Puja / Sunday"
+  },
+  {
+    "date": "2026-11-19",
+    "localName": "Guru Tegh Bahadur Martyrdom",
+    "name": "Guru Tegh Bahadur Martyrdom"
+  },
+  {
+    "date": "2026-11-22",
+    "localName": "Sunday",
+    "name": "Sunday"
+  },
+  {
+    "date": "2026-11-24",
+    "localName": "Guru Nanak Jayanti",
+    "name": "Guru Nanak Jayanti"
+  },
+  {
+    "date": "2026-11-29",
+    "localName": "Sunday",
+    "name": "Sunday"
+  },
+  {
+    "date": "2026-12-06",
+    "localName": "Sunday",
+    "name": "Sunday"
+  },
+  {
+    "date": "2026-12-12",
+    "localName": "Second Saturday",
+    "name": "Second Saturday"
+  },
+  {
+    "date": "2026-12-13",
+    "localName": "Sunday",
+    "name": "Sunday"
+  },
+  {
+    "date": "2026-12-20",
+    "localName": "Sunday",
+    "name": "Sunday"
+  },
+  {
+    "date": "2026-12-25",
+    "localName": "Christmas",
+    "name": "Christmas"
+  },
+  {
+    "date": "2026-12-27",
+    "localName": "Sunday",
+    "name": "Sunday"
+  },
+  {
+    "date": "2026-12-31",
+    "localName": "New Year’s Eve",
+    "name": "New Year’s Eve"
+  }
+]
