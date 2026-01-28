@@ -23,6 +23,7 @@ app.use('/api/ai', require('./src/routes/aiRoutes'));
 app.use('/api/tickets', require('./src/routes/ticketRoutes'));
 app.use('/api/tasks', require('./src/routes/taskRoutes'));
 app.use('/api/dashboard', require('./src/routes/dashboardRoutes'));
+app.use('/api/leaves', require('./src/routes/leaveRoutes'));
 
 // Combined Conflict: Keep BOTH routes
 app.use('/api/hr', require('./src/routes/hrRoutes'));

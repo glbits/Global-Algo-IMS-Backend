@@ -5,14 +5,18 @@ const PayrollItemSchema = new mongoose.Schema(
     payrollRun: { type: mongoose.Schema.Types.ObjectId, ref: 'PayrollRun', required: true },
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
 
-    // ✅ Attendance from IMS only (auto)
+    // ✅ Attendance (auto from IMS, but HR can override workingDays/attendanceDays like your sheet)
     attendance: {
       presentDays: { type: Number, default: 0 },
-      lateDays: { type: Number, default: 0 }
+      lateDays: { type: Number, default: 0 },
+      attendanceDays: { type: Number, default: 0 }, // present + paidLeave + halfDay (0.5)
+      workingDays: { type: Number, default: 0 },    // days in month (or HR override)
+      absentDays: { type: Number, default: 0 }      // workingDays - attendanceDays
     },
 
-    // ✅ Everything else is manual (HR fills)
+    // ✅ Manual fields (HR fills)
     manual: {
+      designation: { type: String, default: '' },
       basicSalary: { type: Number, default: 0 },
       incentive: { type: Number, default: 0 },
       deduction: { type: Number, default: 0 },
@@ -20,8 +24,9 @@ const PayrollItemSchema = new mongoose.Schema(
       remarks: { type: String, default: '' }
     },
 
-    // ✅ netPay auto calculated from manual fields (HR doesn't type net pay)
-    netPay: { type: Number, default: 0 },
+    // ✅ Auto calculated
+    grossSalary: { type: Number, default: 0 }, // basic * attendanceDays / workingDays
+    netPay: { type: Number, default: 0 },      // gross + incentive + allowances - deduction
 
     payslipNumber: { type: String, required: true }
   },

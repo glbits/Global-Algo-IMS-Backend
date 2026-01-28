@@ -12,13 +12,14 @@ router.get('/headcount', auth, HR_ONLY, hr.getHeadcount);
 router.get('/org-chart', auth, HR_ONLY, hr.getOrgChart);
 router.get('/attendance/:userId', auth, HR_ONLY, hr.getAttendanceHistory);
 
-// Payroll (manual)
+// Payroll
 router.post('/payroll/generate', auth, HR_ONLY, hr.generatePayroll);
 router.get('/payroll/:runId', auth, HR_ONLY, hr.getPayrollRun);
 router.patch('/payroll/item/:payrollItemId', auth, HR_ONLY, hr.updatePayrollItem);
 router.post('/payroll/:runId/finalize', auth, HR_ONLY, hr.finalizePayrollRun);
 
-// ✅ Payslip JSON
+// Payslip
 router.get('/payslip/:payrollItemId', auth, HR_ONLY, hr.getPayslip);
+router.get('/payslip/:payrollItemId/pdf', auth, HR_ONLY, hr.getPayslipPdf);
 
 module.exports = router;

@@ -1,88 +1,203 @@
 const CalendarEvent = require('../models/CalendarEvent');
 const axios = require('axios');
+const path = require('path');
+const fs = require('fs');
 
-// 1. GET ALL EVENTS (For the Calendar View)
-// Returns all active events + global holidays that HR hasn't deleted
+// Load offline holiday list (fallback)
+function loadOfflineIndiaHolidays(year) {
+  try {
+    const filePath = path.join(__dirname, '..', 'data', `india-holidays-${year}.json`);
+    if (!fs.existsSync(filePath)) return null;
+    const raw = fs.readFileSync(filePath, 'utf-8');
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : null;
+  } catch (e) {
+    console.error('Offline holiday JSON load failed:', e);
+    return null;
+  }
+}
+
+// ------------------------------------------------------
+// GET EVENTS
+// ------------------------------------------------------
 exports.getEvents = async (req, res) => {
   try {
-    const events = await CalendarEvent.find({ isDeletedByHR: { $ne: true } })
-      .populate('createdBy', 'name');
+    const events = await CalendarEvent.find({
+      isDeletedByHR: { $ne: true },
+      $or: [
+        { type: { $ne: 'Holiday' } },
+        { type: 'Holiday', countryCode: 'IN' }
+      ]
+    }).populate('createdBy', 'name');
+
     res.json(events);
   } catch (err) {
-    console.error(err);
-    res.status(500).send("Server Error");
+    console.error('getEvents error:', err);
+    res.status(500).send('Server Error');
   }
 };
 
-// 2. ADD EVENT (For Manual HR Inputs)
+// ------------------------------------------------------
+// ADD EVENT
+// ------------------------------------------------------
 exports.addEvent = async (req, res) => {
   try {
     const { title, date, type, description } = req.body;
-    const newEvent = new CalendarEvent({
+
+    if (!title || !date) {
+      return res.status(400).json({ msg: 'title and date are required' });
+    }
+
+    const finalType = type || 'Holiday';
+
+    const eventDoc = {
       title,
       date,
-      type, // 'Holiday', 'Meeting', etc.
+      type: finalType,
       description,
       createdBy: req.user.id,
-      isGlobal: false // Manual events are not global system holidays
-    });
+      isGlobal: false
+    };
+
+    if (finalType === 'Holiday') {
+      eventDoc.countryCode = 'IN';
+    }
+
+    const newEvent = new CalendarEvent(eventDoc);
     await newEvent.save();
+
     res.json(newEvent);
   } catch (err) {
-    console.error(err);
-    res.status(500).send("Failed to save event");
+    console.error('addEvent error:', err);
+    res.status(500).send('Failed to save event');
   }
 };
 
-// 3. SYNC INDIAN HOLIDAYS (The Auto-Import Button)
+// ------------------------------------------------------
+// SYNC INDIAN HOLIDAYS (ONLINE + OFFLINE FALLBACK)
+// ------------------------------------------------------
 exports.syncIndianHolidays = async (req, res) => {
+  const year = new Date().getFullYear();
+  const url = `https://date.nager.at/api/v3/PublicHolidays/${year}/IN`;
+
   try {
-    const year = new Date().getFullYear();
-    // Fetch official Indian Holidays
-    const response = await axios.get(`https://date.nager.at/api/v3/PublicHolidays/${year}/IN`);
-    
-    const holidays = response.data.map(h => ({
-      title: h.localName,
+    console.log('Syncing holidays from:', url);
+
+    const response = await axios.get(url, {
+      timeout: 20000,
+      headers: {
+        'Accept': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Global-Algo-IMS)'
+      },
+      validateStatus: (status) => status >= 200 && status < 500
+    });
+
+    console.log('Holiday API status:', response.status);
+
+    // ✅ If API gives 200 + array => use it
+    if (response.status === 200 && Array.isArray(response.data) && response.data.length > 0) {
+      const holidays = response.data.map((h) => ({
+        title: h.localName || h.name || 'Holiday',
+        date: h.date,
+        type: 'Holiday',
+        isGlobal: true,
+        countryCode: 'IN',
+        description: h.name || h.localName || '',
+        isDeletedByHR: false
+      }));
+
+      for (const holiday of holidays) {
+        await CalendarEvent.findOneAndUpdate(
+          { date: holiday.date, title: holiday.title },
+          holiday,
+          { upsert: true, new: true }
+        );
+      }
+
+      return res.json({ msg: `Imported ${holidays.length} Indian Holidays (API).` });
+    }
+
+    // ✅ If 204 OR non-array OR empty => fallback to offline JSON
+    console.log('Holiday API did not return holidays. Falling back to offline JSON.');
+
+    const offline = loadOfflineIndiaHolidays(year);
+    if (!offline) {
+      return res.status(500).json({
+        msg: `Holiday API returned no data (status ${response.status}). Offline file not found: src/data/india-holidays-${year}.json`
+      });
+    }
+
+    const holidays = offline.map((h) => ({
+      title: h.localName || h.name || 'Holiday',
       date: h.date,
       type: 'Holiday',
-      isGlobal: true, 
-      description: h.name
+      isGlobal: true,
+      countryCode: 'IN',
+      description: h.name || h.localName || '',
+      isDeletedByHR: false
     }));
 
-    // Upsert to avoid duplicates
     for (const holiday of holidays) {
       await CalendarEvent.findOneAndUpdate(
         { date: holiday.date, title: holiday.title },
-        { ...holiday, isDeletedByHR: false }, 
-        { upsert: true }
+        holiday,
+        { upsert: true, new: true }
       );
     }
 
-    res.json({ msg: `Imported ${holidays.length} Indian Holidays.` });
+    return res.json({ msg: `Imported ${holidays.length} Indian Holidays (Offline).` });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ msg: "API Sync Failed" });
+    console.error('syncIndianHolidays error:', err?.message || err);
+
+    // Offline fallback also on network failure
+    const offline = loadOfflineIndiaHolidays(year);
+    if (!offline) {
+      return res.status(500).json({
+        msg: `Holiday API failed and offline file missing: src/data/india-holidays-${year}.json`,
+        error: err?.message || 'unknown'
+      });
+    }
+
+    const holidays = offline.map((h) => ({
+      title: h.localName || h.name || 'Holiday',
+      date: h.date,
+      type: 'Holiday',
+      isGlobal: true,
+      countryCode: 'IN',
+      description: h.name || h.localName || '',
+      isDeletedByHR: false
+    }));
+
+    for (const holiday of holidays) {
+      await CalendarEvent.findOneAndUpdate(
+        { date: holiday.date, title: holiday.title },
+        holiday,
+        { upsert: true, new: true }
+      );
+    }
+
+    return res.json({ msg: `Imported ${holidays.length} Indian Holidays (Offline - API failed).` });
   }
 };
 
-// 4. DELETE EVENT (Soft Delete for System Holidays, Hard Delete for Manual)
+// ------------------------------------------------------
+// DELETE EVENT
+// ------------------------------------------------------
 exports.deleteEvent = async (req, res) => {
   try {
     const event = await CalendarEvent.findById(req.params.id);
-    if (!event) return res.status(404).json({ msg: "Not found" });
+    if (!event) return res.status(404).json({ msg: 'Not found' });
 
-    // If it's a "Global" holiday (from the API), we just hide it
     if (event.isGlobal) {
       event.isDeletedByHR = true;
       await event.save();
     } else {
-      // If it's a manual event, we delete it from DB
       await CalendarEvent.findByIdAndDelete(req.params.id);
     }
-    
-    res.json({ msg: "Event removed" });
+
+    res.json({ msg: 'Event removed' });
   } catch (err) {
-    console.error(err);
-    res.status(500).send("Server Error");
+    console.error('deleteEvent error:', err);
+    res.status(500).send('Server Error');
   }
 };
