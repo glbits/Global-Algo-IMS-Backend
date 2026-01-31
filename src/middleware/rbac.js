@@ -1,8 +1,11 @@
 const User = require('../models/User');
 
 // Higher number => more privilege
+// NOTE: LeadManager is "admin-like" privilege for most modules,
+// but certain modules are blocked explicitly via route-level deny middleware.
 const ROLE_RANK = {
   Admin: 3,
+  LeadManager: 3,
   BranchManager: 2,
   HR: 2,
   TeamLead: 1,
@@ -13,20 +16,19 @@ const ROLE_RANK = {
  * Allow only specific roles.
  * Usage: router.get('/x', auth, authorizeRoles('Admin','HR'), handler)
  */
-const authorizeRoles = (...allowed) => {
-  const allowedSet = new Set(allowed);
+const authorizeRoles = (...allowedRoles) => {
+  const allowedSet = new Set(allowedRoles);
   return (req, res, next) => {
-    if (!req.user?.role) return res.status(401).json({ msg: 'Unauthorized' });
-    if (!allowedSet.has(req.user.role)) {
-      return res.status(403).json({ msg: 'Forbidden' });
-    }
+    const role = req.user?.role;
+    if (!role) return res.status(401).json({ msg: 'Unauthorized' });
+    if (!allowedSet.has(role)) return res.status(403).json({ msg: 'Forbidden' });
     next();
   };
 };
 
 /**
  * Can assign/manage another user?
- * Admin can manage everyone.
+ * Admin/LeadManager can manage everyone below them.
  * HR/BM can manage TeamLead + Employee.
  * TeamLead can manage Employee.
  */
@@ -48,14 +50,17 @@ const canManageTargetUser = (actorRole, targetRole) => {
  */
 const requireCanManageTarget = async (req, res, next) => {
   try {
-    const targetId = req.body?.assignedTo || req.params?.userId || req.query?.targetUserId;
+    const targetId =
+      req.body?.assignedTo || req.params?.userId || req.query?.targetUserId;
     if (!targetId) return res.status(400).json({ msg: 'Target user id missing' });
 
     const target = await User.findById(targetId).select('role');
     if (!target) return res.status(404).json({ msg: 'Target user not found' });
 
     if (!canManageTargetUser(req.user.role, target.role)) {
-      return res.status(403).json({ msg: 'You are not allowed to manage this user' });
+      return res
+        .status(403)
+        .json({ msg: 'You are not allowed to manage this user' });
     }
 
     req.targetUser = target;
@@ -66,12 +71,9 @@ const requireCanManageTarget = async (req, res, next) => {
   }
 };
 
-exports.authorizeRoles = (...allowedRoles) => {
-  return (req, res, next) => {
-    const role = req.user?.role;
-    if (!role) return res.status(401).json({ msg: 'Unauthorized' });
-    if (!allowedRoles.includes(role)) return res.status(403).json({ msg: 'Forbidden' });
-    next();
-  };
+module.exports = {
+  ROLE_RANK,
+  authorizeRoles,
+  canManageTargetUser,
+  requireCanManageTarget
 };
-

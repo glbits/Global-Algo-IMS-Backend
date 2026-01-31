@@ -155,7 +155,7 @@ exports.getCalendarData = async (req, res) => {
 
     // RBAC: Check if user is allowed to view others
     if (targetUserId && targetUserId !== req.user.id) {
-      const elevatedRoles = ['Admin', 'BranchManager', 'HR', 'TeamLead', 'LeadManager'];
+      const elevatedRoles = ['Admin', 'BranchManager', 'HR', 'TeamLead'];
       if (elevatedRoles.includes(req.user.role)) {
          queryId = targetUserId;
       } else {
