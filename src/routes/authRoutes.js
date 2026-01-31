@@ -1,4 +1,3 @@
-
 const express = require('express');
 const router = express.Router();
 
@@ -6,29 +5,34 @@ const {
   login,
   registerUser,
   getMySubordinates,
-  getMyDownlineUsers,   // ✅ NEW (added)
+  getMyDownlineUsers,
   getAllUsers,
   deleteUser,
   getMe
 } = require('../controllers/authController');
 
 const auth = require('../middleware/auth');
+const denyRoles = require('../middleware/denyRoles');
 
+// Public
 router.post('/login', login);
 
-// Protected Route: Only logged-in users can create subordinates
-router.post('/register', auth, registerUser);
+// Protected: Only logged-in users can create subordinates (LeadManager must NOT access Add Member)
+router.post('/register', auth, denyRoles('LeadManager'), registerUser);
 
-// Existing (direct subordinates only)
+// Direct subordinates only
 router.get('/subordinates', auth, getMySubordinates);
 
-// ✅ NEW: All levels under you (Admin -> BranchManager -> TeamLead -> Employee)
+// All levels under you (Admin -> BranchManager -> TeamLead -> Employee)
 router.get('/downline', auth, getMyDownlineUsers);
 
-router.get('/all-users', auth, getAllUsers);
+// For staff monitoring pages (Admin/BM/HR) - LeadManager excluded
+router.get('/all-users', auth, denyRoles('LeadManager'), getAllUsers);
 
-router.delete('/user/:id', auth, deleteUser);
+// Delete user - LeadManager excluded (and controller enforces Admin-only)
+router.delete('/user/:id', auth, denyRoles('LeadManager'), deleteUser);
 
+// My profile
 router.get('/me', auth, getMe);
 
 module.exports = router;

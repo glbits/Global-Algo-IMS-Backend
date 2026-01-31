@@ -2,18 +2,26 @@ const User = require('../models/User');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs'); 
 
-// --- LOGIN CONTROLLER ---
+// ================= LOGIN CONTROLLER =================
 exports.login = async (req, res) => {
   const { email, password } = req.body;
 
   try {
-    const user = await User.findOne({ email: email.trim() });
+    // ✅ normalize email
+    const user = await User.findOne({
+      email: email.trim().toLowerCase()
+    });
+
     if (!user) return res.status(400).json({ msg: "User not found" });
 
     let isMatch = false;
+
+    // hashed password
     if (user.password.startsWith('$2a$') || user.password.startsWith('$2b$')) {
       isMatch = await bcrypt.compare(password, user.password);
-    } else {
+    } 
+    // plain password (auto-hash)
+    else {
       if (user.password === password) {
         isMatch = true;
         const salt = await bcrypt.genSalt(10);
@@ -30,7 +38,10 @@ exports.login = async (req, res) => {
       { expiresIn: '1d' }
     );
 
-    res.json({ token, user: { id: user._id, name: user.name, role: user.role } });
+    res.json({
+      token,
+      user: { id: user._id, name: user.name, role: user.role }
+    });
 
   } catch (err) {
     console.error(err);
@@ -38,7 +49,7 @@ exports.login = async (req, res) => {
   }
 };
 
-// --- REGISTER USER CONTROLLER ---
+// ================= REGISTER USER CONTROLLER =================
 exports.registerUser = async (req, res) => {
   const { name, email, password, role: requestedRole, branch, salary } = req.body;
   const creatorRole = req.user.role;
@@ -47,23 +58,43 @@ exports.registerUser = async (req, res) => {
   try {
     let newRole = '';
 
+    // ===== ADMIN RULES =====
     if (creatorRole === 'Admin') {
-      newRole = requestedRole === 'HR' ? 'HR' : (requestedRole === 'LeadManager' ? 'LeadManager' : 'BranchManager');
-    } else if (creatorRole === 'BranchManager' || creatorRole === 'HR') {
+      // ❌ Admin CANNOT create LeadManager
+      if (requestedRole === 'LeadManager') {
+        return res.status(403).json({
+          msg: 'Admin is not allowed to create Lead Manager'
+        });
+      }
+
+      // ✅ Admin CAN create ONLY HR or BranchManager
+      newRole = requestedRole === 'HR' ? 'HR' : 'BranchManager';
+    }
+
+    // ===== BRANCH MANAGER / HR =====
+    else if (creatorRole === 'BranchManager' || creatorRole === 'HR') {
       newRole = 'TeamLead';
-    } else if (creatorRole === 'TeamLead') {
+    }
+
+    // ===== TEAM LEAD =====
+    else if (creatorRole === 'TeamLead') {
       newRole = 'Employee';
-    } else {
+    }
+
+    else {
       return res.status(403).json({ msg: "Not authorized" });
     }
 
-    let user = await User.findOne({ email });
+    // ✅ normalize email
+    let user = await User.findOne({
+      email: email.trim().toLowerCase()
+    });
     if (user) return res.status(400).json({ msg: 'User already exists' });
 
     user = new User({
       name,
-      email,
-      password, 
+      email: email.trim().toLowerCase(),
+      password,
       role: newRole,
       reportsTo: creatorId,
       branch: typeof branch === 'string' ? branch : '',
@@ -78,6 +109,7 @@ exports.registerUser = async (req, res) => {
     user.password = await bcrypt.hash(password, salt);
 
     await user.save();
+
     res.json({ msg: `Success! Created ${newRole}: ${name}` });
 
   } catch (err) {
@@ -86,7 +118,7 @@ exports.registerUser = async (req, res) => {
   }
 };
 
-// --- HELPER CONTROLLERS ---
+// ================= HELPER CONTROLLERS =================
 exports.getMySubordinates = async (req, res) => {
   try {
     const subordinates = await User.find({ reportsTo: req.user.id })
@@ -128,7 +160,16 @@ exports.getMyDownlineUsers = async (req, res) => {
 
 exports.getAllUsers = async (req, res) => {
   try {
-    const users = await User.find().select('name email role');
+    const role = req.user?.role;
+
+    // Only Admin / BranchManager / HR
+    if (!['Admin', 'BranchManager', 'HR'].includes(role)) {
+      return res.status(403).json({ msg: 'Forbidden' });
+    }
+
+    const users = await User.find()
+      .select('name email role createdAt');
+
     res.json(users);
   } catch (err) {
     res.status(500).send("Server Error");
@@ -137,15 +178,21 @@ exports.getAllUsers = async (req, res) => {
 
 exports.deleteUser = async (req, res) => {
   try {
+    // Only Admin
+    if (req.user?.role !== 'Admin') {
+      return res.status(403).json({ msg: 'Forbidden' });
+    }
+
     const userToDelete = await User.findById(req.params.id);
     if (!userToDelete) return res.status(404).json({ msg: "User not found" });
 
     await require('../models/Lead').updateMany(
       { assignedTo: userToDelete._id },
-      { assignedTo: req.user.id, status: 'New', touchCount: 0 } 
+      { assignedTo: req.user.id, status: 'New', touchCount: 0 }
     );
 
     await User.findByIdAndDelete(req.params.id);
+
     res.json({ msg: "User deleted. Leads returned to you." });
   } catch (err) {
     console.error(err);
@@ -155,7 +202,8 @@ exports.deleteUser = async (req, res) => {
 
 exports.getMe = async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).select('-password');
+    const user = await User.findById(req.user.id)
+      .select('-password');
     res.json(user);
   } catch (err) {
     console.error(err);
